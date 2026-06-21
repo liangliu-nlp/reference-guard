@@ -1,0 +1,18 @@
+{
+  "addons": {
+    "reference-guard@liangliu-nlp.github.io": {
+      "updates": [
+        {
+          "version": "0.2.23",
+          "update_link": "https://github.com/liangliu-nlp/reference-guard/releases/download/v0.2.23/reference-guard.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "9.0",
+              "strict_max_version": "9.0.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
