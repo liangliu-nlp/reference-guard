@@ -85,6 +85,18 @@ assert.deepStrictEqual(
   "parses bare numeric clicks inside bracketed references"
 );
 
+assert.strictEqual(
+  h.shouldBlock("8", "the actor f(x) = y uses predefined correction instructions [ 8 ] to improve feedback"),
+  false,
+  "keeps spaced bracketed numeric citations even in math-like context"
+);
+
+assert.deepStrictEqual(
+  h.parseClickReferences("8", "predefined correction instructions [ 8 ] to process-based supervision"),
+  [{ type: "number", number: "8", label: "8" }],
+  "parses bare numeric clicks inside spaced bracketed citations"
+);
+
 assert.deepStrictEqual(
   h.parseReferenceTriggers("1", "L(theta) = 1 / N sum_n log p_theta(y_n | x_n)"),
   [],
@@ -234,6 +246,28 @@ assert.deepStrictEqual(
     "Systems, 37:1270-1303, 2024. 1"
   ],
   "stops partial author highlighting at the next reference start"
+);
+
+let boundedNumericMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 16,
+    text: "[15] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y K Li, Y Wu, DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025. [16] Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao.",
+    items: [
+      pdfLine("[15] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y K Li, Y Wu,", 56, 700),
+      pdfLine("DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025.", 66, 685),
+      pdfLine("[16] Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao.", 56, 660)
+    ]
+  }
+], { type: "number", number: "15", label: "15" });
+
+assert.ok(boundedNumericMatch, "matches numbered RLTF reference");
+assert.deepStrictEqual(
+  boundedNumericMatch.lines.map((line) => line.text),
+  [
+    "[15] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Mingchuan Zhang, Y K Li, Y Wu,",
+    "DeepSeek-AI. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025."
+  ],
+  "stops numeric highlighting at the next numbered reference"
 );
 
 console.log("ref-guard heuristics ok");

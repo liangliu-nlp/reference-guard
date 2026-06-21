@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.23";
+  const CODE_VERSION = "0.2.24";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -93,7 +93,7 @@
       text = this.cleanText(text);
       context = this.cleanText(context);
       if (!this.isShortNumeric(text)) return false;
-      if (this.isCitationLike(text, context) && !this.isMathContext(context)) return false;
+      if (this.isCitationLike(text, context)) return false;
       return this.isMathContext(context);
     },
 
@@ -1160,7 +1160,12 @@
   function looksLikeNextReferenceStart(base, line) {
     if (line.left > base.left + 7) return false;
     if (/^\d{1,4}$/.test(line.text)) return false;
-    return /^[A-Z][A-Za-z'\u2019.-]+(?:-[A-Z][A-Za-z'\u2019.-]+)?\s+(?:[A-Z][A-Za-z'\u2019.-]+|[A-Z]\.|and\b)/.test(line.text);
+    return looksLikeNumberedReferenceStart(line.text)
+      || /^[A-Z][A-Za-z'\u2019.-]+(?:-[A-Z][A-Za-z'\u2019.-]+)?\s+(?:[A-Z][A-Za-z'\u2019.-]+|[A-Z]\.|and\b)/.test(line.text);
+  }
+
+  function looksLikeNumberedReferenceStart(text) {
+    return /^(?:\[\s*\d{1,3}\s*\]|\d{1,3}[.)])\s+\S/.test(text);
   }
 
   function referenceText(group) {

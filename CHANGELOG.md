@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.24
+
+- Keep explicit square-bracket numeric citations active even when nearby text contains math-like symbols.
+- Stop numeric-reference highlighting at the next numbered bibliography entry.
+
 ## 0.2.23
 
 - Bound author-year reference highlighting at the next reference entry when Zotero exposes only a partial clicked citation.

@@ -1,6 +1,6 @@
 {
   "name": "reference-guard",
-  "version": "0.2.23",
+  "version": "0.2.24",
   "private": true,
   "description": "A Zotero 9 reader plugin that improves reference-jump highlighting and reduces false citation hits.",
   "license": "MIT",
