@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.26
+
+- Retry the destination highlight on the matched page when Zotero reports the source page during delayed flashing.
+
 ## 0.2.25
 
 - Stop author-year highlighting before reference starts such as `Nelson F Liu`, where the middle initial has no period.

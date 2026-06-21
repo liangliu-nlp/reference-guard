@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.25";
+  const CODE_VERSION = "0.2.26";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -1319,6 +1319,14 @@
           if (rects.length) {
             flashRects(win, rects, 4200);
             return;
+          }
+          if (currentPageNumber(win) !== match.page.pageNumber && navigateToPage(win, match.page.pageNumber)) {
+            scrolled = scrollToMatch(win, match);
+            let retryRects = lineRects(win, match);
+            if (retryRects.length) {
+              flashRects(win, retryRects, 4200);
+              return;
+            }
           }
           diag("fallback.flashMiss", {
             page: match.page.pageNumber,
