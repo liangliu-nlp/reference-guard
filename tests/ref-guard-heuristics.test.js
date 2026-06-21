@@ -248,6 +248,29 @@ assert.deepStrictEqual(
   "stops partial author highlighting at the next reference start"
 );
 
+let middleInitialAuthorStartMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 14,
+    text: "Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. Visual instruction tuning. Advances in neural information processing systems, 36:34892-34916, 2023. Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. Lost in the middle: How language models use long contexts. Transactions of the association for computational linguistics, 12:157-173, 2024b. 1",
+    items: [
+      pdfLine("Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee. Visual instruction tuning. Advances in neural information processing", 56, 700),
+      pdfLine("systems, 36:34892-34916, 2023.", 66, 685),
+      pdfLine("Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. Lost in the", 56, 660),
+      pdfLine("middle: How language models use long contexts. Transactions of the association for computational linguistics, 12:157-173, 2024b. 1", 66, 645)
+    ]
+  }
+], { type: "author-year", author: "Liu", year: "2024", label: "Liu et al., 2024b", suffix: "b" });
+
+assert.ok(middleInitialAuthorStartMatch, "matches the Liu 2024b reference after a prior Liu entry");
+assert.deepStrictEqual(
+  middleInitialAuthorStartMatch.lines.map((line) => line.text),
+  [
+    "Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. Lost in the",
+    "middle: How language models use long contexts. Transactions of the association for computational linguistics, 12:157-173, 2024b. 1"
+  ],
+  "does not swallow the previous Haotian Liu entry"
+);
+
 let boundedNumericMatch = hooks.findReferenceMatch([
   {
     pageNumber: 16,

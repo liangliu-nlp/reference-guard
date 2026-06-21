@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.25
+
+- Stop author-year highlighting before reference starts such as `Nelson F Liu`, where the middle initial has no period.
+
 ## 0.2.24
 
 - Keep explicit square-bracket numeric citations active even when nearby text contains math-like symbols.
