@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.26";
+  const CODE_VERSION = "0.2.27";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -275,14 +275,21 @@
     let node = nearestTextElement(element);
     if (!node) return "";
 
-    for (let current = node.previousSibling; current && pieces.join(" ").length < 160; current = current.previousSibling) {
-      pieces.unshift(current.textContent || "");
+    let length = 0;
+    for (let current = node.previousSibling; current && length < 160; current = current.previousSibling) {
+      let piece = current.textContent || "";
+      pieces.unshift(piece);
+      length += piece.length + 1;
     }
 
-    pieces.push(node.textContent || "");
+    let ownText = node.textContent || "";
+    pieces.push(ownText);
+    length += ownText.length + 1;
 
-    for (let current = node.nextSibling; current && pieces.join(" ").length < 320; current = current.nextSibling) {
-      pieces.push(current.textContent || "");
+    for (let current = node.nextSibling; current && length < 320; current = current.nextSibling) {
+      let piece = current.textContent || "";
+      pieces.push(piece);
+      length += piece.length + 1;
     }
 
     let text = Heuristics.cleanText(pieces.join(" "));
@@ -989,25 +996,21 @@
     }
   }
 
-  function visibleLineMatchesReference(line, ref) {
-    if (ref.type === "number") {
-      return numberedReferencePattern(ref.number).test(line.text);
-    }
-    return new RegExp("\\b" + escapeRegExp(ref.author) + "\\b", "i").test(line.text);
-  }
-
   function visibleReferenceGroup(win, ref) {
     let lines = visibleTextLines(win);
+    let matchesLine = referenceLineMatcher(ref);
     for (let i = 0; i < lines.length; i++) {
-      if (!visibleLineMatchesReference(lines[i], ref)) continue;
+      if (!matchesLine(lines[i])) continue;
       let base = lines[i];
       let group = [base];
+      let text = base.text;
       for (let j = i + 1; j < lines.length && group.length < 6; j++) {
         if (!sameColumn(base, lines[j])) continue;
         group.push(lines[j]);
-        if (ref.year && group.map((line) => line.text).join(" ").includes(ref.year)) break;
+        text += " " + lines[j].text;
+        if (ref.year && text.includes(ref.year)) break;
       }
-      if (!ref.year || group.map((line) => line.text).join(" ").includes(ref.year)) return group;
+      if (!ref.year || text.includes(ref.year)) return group;
     }
     return null;
   }
@@ -1075,8 +1078,13 @@
   }
 
   function referenceStartIndex(pages) {
+    if (pages.referenceStartIndex != null) return pages.referenceStartIndex;
+
     let explicit = pages.findIndex((page) => /\b(references|bibliography)\b/i.test(page.text));
-    if (explicit >= 0) return explicit;
+    if (explicit >= 0) {
+      pages.referenceStartIndex = explicit;
+      return explicit;
+    }
 
     let dense = pages.findIndex((page) => {
       if (page.pageNumber < 4) return false;
@@ -1084,10 +1092,13 @@
       let numeric = page.text.match(/(?:^|\s)\[?\d{1,3}\]?\s+[A-Z][A-Za-z]/g);
       return (hits && hits.length >= 6) || (numeric && numeric.length >= 8);
     });
-    return dense >= 0 ? dense : Math.max(0, pages.length - 8);
+    pages.referenceStartIndex = dense >= 0 ? dense : Math.max(0, pages.length - 8);
+    return pages.referenceStartIndex;
   }
 
   function itemLines(page) {
+    if (page.lines) return page.lines;
+
     let raw = page.items
       .filter((item) => item.str && item.transform?.length >= 6)
       .map((item) => ({
@@ -1120,10 +1131,11 @@
     }
 
     lines.sort((a, b) => b.y - a.y || a.left - b.left);
-    return lines.map((line) => {
+    page.lines = lines.map((line) => {
       line.text = Heuristics.cleanText(line.text);
       return line;
     }).filter((line) => line.text);
+    return page.lines;
   }
 
   function samePdfColumn(base, line) {
@@ -1135,24 +1147,27 @@
     return new RegExp("(?:^|\\s)(?:\\[\\s*" + escapeRegExp(number) + "\\s*\\]|" + escapeRegExp(number) + "\\s*[.)])\\s+");
   }
 
-  function lineMatchesReference(line, ref) {
+  function referenceLineMatcher(ref) {
     if (ref.type === "number") {
-      return numberedReferencePattern(ref.number).test(line.text);
+      let pattern = numberedReferencePattern(ref.number);
+      return (line) => pattern.test(line.text);
     }
     let author = new RegExp("\\b" + escapeRegExp(ref.author) + "\\b", "i");
-    return author.test(line.text);
+    return (line) => author.test(line.text);
   }
 
   function collectReferenceLines(lines, index, ref) {
     let base = lines[index];
     let group = [base];
+    let text = base.text;
     for (let i = index + 1; i < lines.length && group.length < 6; i++) {
       let line = lines[i];
       if (Math.abs(line.y - base.y) < 3 && line.left > base.right + 24) continue;
       if (!samePdfColumn(base, line)) continue;
       if (group.length > 1 && looksLikeNextReferenceStart(base, line)) break;
       group.push(line);
-      if (ref.year && group.map((item) => item.text).join(" ").includes(ref.year)) break;
+      text += " " + line.text;
+      if (ref.year && text.includes(ref.year)) break;
     }
     return group;
   }
@@ -1182,7 +1197,8 @@
 
   function appendNextPageReferenceLines(pages, pageIndex, lines, index, group, ref) {
     let expectedYear = expectedReferenceYear(ref);
-    if (!expectedYear || referenceText(group).includes(expectedYear)) return group;
+    let text = referenceText(group);
+    if (!expectedYear || text.includes(expectedYear)) return group;
     if (!shouldTryNextPage(lines, index, group)) return group;
 
     let nextPage = pages[pageIndex + 1];
@@ -1196,7 +1212,8 @@
       if (group.length >= 10) break;
 
       group.push(line);
-      if (referenceText(group).includes(expectedYear)) {
+      text += " " + line.text;
+      if (text.includes(expectedYear)) {
         diag("fallback.crossPageReference", {
           ref,
           from: base.page.pageNumber,
@@ -1212,11 +1229,12 @@
   function findReferenceMatch(pages, ref) {
     if (!pages.length) return null;
     let start = referenceStartIndex(pages);
+    let matchesLine = referenceLineMatcher(ref);
     for (let pageIndex = start; pageIndex < pages.length; pageIndex++) {
       let page = pages[pageIndex];
       let lines = itemLines(page);
       for (let i = 0; i < lines.length; i++) {
-        if (!lineMatchesReference(lines[i], ref)) continue;
+        if (!matchesLine(lines[i])) continue;
         let group = appendNextPageReferenceLines(pages, pageIndex, lines, i, collectReferenceLines(lines, i, ref), ref);
         let text = referenceText(group);
         let expectedYear = expectedReferenceYear(ref);

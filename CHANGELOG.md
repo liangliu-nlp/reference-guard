@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.27
+
+- Cache parsed PDF reference lines and reference-section detection for repeated clicks.
+- Reuse per-reference matchers instead of compiling regular expressions for every line.
+- Avoid repeated string joins in click-context and reference-group scans.
+
 ## 0.2.26
 
 - Retry the destination highlight on the matched page when Zotero reports the source page during delayed flashing.
