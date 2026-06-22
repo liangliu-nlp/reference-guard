@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.28
+
+- Preserve Zotero Reader back navigation for plugin-handled reference jumps.
+
 ## 0.2.27
 
 - Cache parsed PDF reference lines and reference-section detection for repeated clicks.

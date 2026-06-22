@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.27";
+  const CODE_VERSION = "0.2.28";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -588,6 +588,37 @@
     return pdfViewer?.currentPageNumber || app?.page || null;
   }
 
+  function getZoteroReaderView(win) {
+    let parent = null;
+    try {
+      parent = unwrap(win.parent);
+    }
+    catch (_) {}
+    let reader = unwrap(parent?._reader);
+    if (!reader) return null;
+
+    let rawWin = unwrap(win);
+    for (let name of ["_primaryView", "_secondaryView", "_lastView"]) {
+      let view = unwrap(reader[name]);
+      if (!view) continue;
+      if (unwrap(view._iframeWindow) === rawWin || name === "_lastView") return view;
+    }
+    return null;
+  }
+
+  async function prepareZoteroHistory(win) {
+    let view = getZoteroReaderView(win);
+    if (!view?._pushHistoryPoint) return null;
+
+    await view._pushHistoryPoint();
+    let history = unwrap(view._history);
+    if (history && "_lastSaveTime" in history) {
+      // Zotero coalesces quick history saves; a reference jump should be a hard back point.
+      history._lastSaveTime = 0;
+    }
+    return view;
+  }
+
   function anchorHash(href) {
     href = String(href || "");
     let hashIndex = href.indexOf("#");
@@ -956,7 +987,21 @@
     }
   }
 
-  async function openNativeDestination(win, dest) {
+  async function openNativeDestination(win, dest, { history = false } = {}) {
+    if (history) {
+      try {
+        let view = await prepareZoteroHistory(win);
+        if (view?.navigate) {
+          await view.navigate({ dest });
+          diag("history.nativeDestination", { page: currentPageNumber(win), dest: typeof dest === "string" ? dest : !!dest });
+          return true;
+        }
+      }
+      catch (e) {
+        diag("history.nativeDestinationError", { message: String(e) });
+      }
+    }
+
     let app = unwrap(getPDFApplication(win));
     let linkService = unwrap(app?.pdfLinkService || app?.linkService);
     if (linkService?.goToDestination && dest) {
@@ -1245,8 +1290,28 @@
     return null;
   }
 
-  function navigateToPage(win, pageNumber) {
+  async function navigateToPage(win, pageNumber, { history = false } = {}) {
+    if (history) {
+      try {
+        let view = await prepareZoteroHistory(win);
+        if (view?.navigate) {
+          await view.navigate({ pageIndex: pageNumber - 1 });
+          diag("history.page", { page: pageNumber });
+          return true;
+        }
+      }
+      catch (e) {
+        diag("history.pageError", { page: pageNumber, message: String(e) });
+      }
+    }
+
     let app = unwrap(getPDFApplication(win));
+    let linkService = unwrap(app?.pdfLinkService || app?.linkService);
+    if (history && linkService?.goToPage) {
+      linkService.goToPage(pageNumber);
+      return true;
+    }
+
     let pdfViewer = unwrap(app?.pdfViewer);
     if (pdfViewer?.scrollPageIntoView) {
       pdfViewer.scrollPageIntoView({ pageNumber });
@@ -1338,13 +1403,14 @@
             flashRects(win, rects, 4200);
             return;
           }
-          if (currentPageNumber(win) !== match.page.pageNumber && navigateToPage(win, match.page.pageNumber)) {
-            scrolled = scrollToMatch(win, match);
-            let retryRects = lineRects(win, match);
-            if (retryRects.length) {
-              flashRects(win, retryRects, 4200);
-              return;
-            }
+          if (currentPageNumber(win) !== match.page.pageNumber) {
+            navigateToPage(win, match.page.pageNumber).then((ok) => {
+              if (!ok || frameState.clickId !== clickId) return;
+              scrolled = scrollToMatch(win, match);
+              let retryRects = lineRects(win, match);
+              if (retryRects.length) flashRects(win, retryRects, 4200);
+            });
+            return;
           }
           diag("fallback.flashMiss", {
             page: match.page.pageNumber,
@@ -1380,7 +1446,7 @@
         diag("fallback.nativePageChangeMismatch", { ref, nativePage: nativeChangedTo, matchPage: match.page.pageNumber });
         continue;
       }
-      if (!nativeChangedTo && !navigateToPage(win, match.page.pageNumber)) {
+      if (!nativeChangedTo && !(await navigateToPage(win, match.page.pageNumber, { history: true }))) {
         diag("fallback.miss", { ref });
         continue;
       }
@@ -1413,7 +1479,7 @@
         direct: nativeLink.direct,
         source: nativeLink.source || "dom"
       });
-      openNativeDestination(win, nativeLink.dest).catch(logError);
+      openNativeDestination(win, nativeLink.dest, { history: true }).catch(logError);
       scheduleNativeHighlight(win, frameState, nativeLink.dest, click.clickId).catch(logError);
       return;
     }
@@ -1657,7 +1723,12 @@
             direct: nativeLink.direct,
             source: "dom"
           });
-          if (!nativeLink.direct) {
+          if (nativeLink.dest) {
+            event.preventDefault();
+            event.stopPropagation();
+            openNativeDestination(win, nativeLink.dest, { history: true }).catch((e) => this.log(e));
+          }
+          else if (!nativeLink.direct) {
             openNativeDestination(win, nativeLink.dest).catch((e) => this.log(e));
           }
           scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
