@@ -271,6 +271,40 @@ assert.deepStrictEqual(
   "does not swallow the previous Haotian Liu entry"
 );
 
+let longAuthorTitleMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 12,
+    text: "Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe. 2022. Training language models to follow instructions with human feedback. Liangming Pan, Michael Saxon, Wenda Xu, Deepak Nathani.",
+    items: [
+      pdfLine("Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida,", 56, 700),
+      pdfLine("Carroll L. Wainwright, Pamela Mishkin, Chong", 66, 685),
+      pdfLine("Zhang, Sandhini Agarwal, Katarina Slama, Alex", 66, 670),
+      pdfLine("Ray, John Schulman, Jacob Hilton, Fraser Kelton,", 66, 655),
+      pdfLine("Luke Miller, Maddie Simens, Amanda Askell, Peter", 66, 640),
+      pdfLine("Welinder, Paul Christiano, Jan Leike, and Ryan", 66, 625),
+      pdfLine("Lowe. 2022. Training language models to follow", 66, 610),
+      pdfLine("instructions with human feedback.", 66, 595),
+      pdfLine("Liangming Pan, Michael Saxon, Wenda Xu, Deepak", 56, 570)
+    ]
+  }
+], { type: "author-year", author: "Ouyang", year: "2022", label: "Ouyang et al., 2022)" });
+
+assert.ok(longAuthorTitleMatch, "matches long Ouyang author-year reference");
+assert.deepStrictEqual(
+  longAuthorTitleMatch.lines.map((line) => line.text),
+  [
+    "Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida,",
+    "Carroll L. Wainwright, Pamela Mishkin, Chong",
+    "Zhang, Sandhini Agarwal, Katarina Slama, Alex",
+    "Ray, John Schulman, Jacob Hilton, Fraser Kelton,",
+    "Luke Miller, Maddie Simens, Amanda Askell, Peter",
+    "Welinder, Paul Christiano, Jan Leike, and Ryan",
+    "Lowe. 2022. Training language models to follow",
+    "instructions with human feedback."
+  ],
+  "keeps title lines after the year and stops before the next reference"
+);
+
 let boundedNumericMatch = hooks.findReferenceMatch([
   {
     pageNumber: 16,

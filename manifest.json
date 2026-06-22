@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Reference Guard",
-  "version": "0.2.28",
+  "version": "0.2.29",
   "description": "Reduces false reference hits in Zotero Reader and flashes the jump destination.",
   "author": "Liang Liu",
   "homepage_url": "https://github.com/liangliu-nlp/reference-guard",

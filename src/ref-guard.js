@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.28";
+  const CODE_VERSION = "0.2.29";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -1084,6 +1084,24 @@
     }
   }
 
+  function clickReferences(citationHit, text, context) {
+    return citationHit?.refs?.length
+      ? citationHit.refs
+      : Heuristics.parseClickReferences(text, context);
+  }
+
+  function diagFallbackClick(click, refs, extra) {
+    diag("fallback.click", Object.assign({
+      page: click.beforePage,
+      x: Math.round(click.x),
+      y: Math.round(click.y),
+      text: clip(click.text),
+      context: clip(click.context),
+      pointHit: !!click.citationHit?.refs?.length,
+      refs
+    }, extra || {}));
+  }
+
   function escapeRegExp(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
@@ -1205,14 +1223,14 @@
     let base = lines[index];
     let group = [base];
     let text = base.text;
-    for (let i = index + 1; i < lines.length && group.length < 6; i++) {
+    let maxLines = ref.type === "author-year" ? 10 : 6;
+    for (let i = index + 1; i < lines.length && group.length < maxLines; i++) {
       let line = lines[i];
       if (Math.abs(line.y - base.y) < 3 && line.left > base.right + 24) continue;
       if (!samePdfColumn(base, line)) continue;
       if (group.length > 1 && looksLikeNextReferenceStart(base, line)) break;
       group.push(line);
       text += " " + line.text;
-      if (ref.year && text.includes(ref.year)) break;
     }
     return group;
   }
@@ -1462,6 +1480,25 @@
   }
 
   async function resolveNonDomClick(win, frameState, click, logError) {
+    if (click.citationHit?.rejected) {
+      diag("fallback.pointReject", {
+        page: click.beforePage,
+        x: Math.round(click.x),
+        y: Math.round(click.y),
+        candidates: click.citationHit.candidates,
+        context: clip(click.citationHit.context)
+      });
+      return;
+    }
+
+    if (Heuristics.shouldBlock(click.text, click.context)) {
+      diag("fallback.block", { page: click.beforePage, text: clip(click.text), context: clip(click.context) });
+      return;
+    }
+
+    let refs = clickReferences(click.citationHit, click.text, click.context);
+    if (!refs.length) return;
+
     let nativeLink = null;
     try {
       nativeLink = await nativeAnnotationAtPoint(win, click.x, click.y, click.element);
@@ -1480,40 +1517,12 @@
         source: nativeLink.source || "dom"
       });
       openNativeDestination(win, nativeLink.dest, { history: true }).catch(logError);
-      scheduleNativeHighlight(win, frameState, nativeLink.dest, click.clickId).catch(logError);
+      diagFallbackClick(click, refs, { native: true });
+      await resolveFallback(win, frameState, refs, click.clickId, click.beforePage);
       return;
     }
 
-    if (click.citationHit?.rejected) {
-      diag("fallback.pointReject", {
-        page: click.beforePage,
-        x: Math.round(click.x),
-        y: Math.round(click.y),
-        candidates: click.citationHit.candidates,
-        context: clip(click.citationHit.context)
-      });
-      return;
-    }
-
-    if (Heuristics.shouldBlock(click.text, click.context)) {
-      diag("fallback.block", { page: click.beforePage, text: clip(click.text), context: clip(click.context) });
-      return;
-    }
-
-    let refs = click.citationHit?.refs?.length
-      ? click.citationHit.refs
-      : Heuristics.parseClickReferences(click.text, click.context);
-    if (!refs.length) return;
-
-    diag("fallback.click", {
-      page: click.beforePage,
-      x: Math.round(click.x),
-      y: Math.round(click.y),
-      text: clip(click.text),
-      context: clip(click.context),
-      pointHit: !!click.citationHit?.refs?.length,
-      refs
-    });
+    diagFallbackClick(click, refs);
     await resolveFallback(win, frameState, refs, click.clickId, click.beforePage);
   }
 
@@ -1715,9 +1724,14 @@
 
         let nativeLink = nativeLinkAtPoint(win, event.clientX, event.clientY, element);
         if (nativeLink) {
+          let citationHit = citationHitAtPoint(win, event.clientX, event.clientY);
+          let text = citationHit && !citationHit.rejected ? citationHit.text : eventText(event);
+          let context = citationHit?.context || combinedContext(win, event, element);
+          let beforePage = currentPageNumber(win);
+          let refs = citationHit?.rejected ? [] : clickReferences(citationHit, text, context);
           let clickId = ++frameState.clickId;
           diag("nativeLink.click", {
-            page: currentPageNumber(win),
+            page: beforePage,
             href: clip(nativeLink.href, 220),
             dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest,
             direct: nativeLink.direct,
@@ -1731,7 +1745,20 @@
           else if (!nativeLink.direct) {
             openNativeDestination(win, nativeLink.dest).catch((e) => this.log(e));
           }
-          scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
+          if (refs.length) {
+            diagFallbackClick({
+              beforePage,
+              x: event.clientX,
+              y: event.clientY,
+              text,
+              context,
+              citationHit
+            }, refs, { native: true });
+            resolveFallback(win, frameState, refs, clickId, beforePage).catch((e) => this.log(e));
+          }
+          else {
+            scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
+          }
           return;
         }
 

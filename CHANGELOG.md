@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.29
+
+- Route native PDF citation links through the same exact reference text matching used by fallback clicks.
+- Keep full long author-year reference entries highlighted after the year, including title continuation lines.
+
 ## 0.2.28
 
 - Preserve Zotero Reader back navigation for plugin-handled reference jumps.
