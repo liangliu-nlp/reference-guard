@@ -1,5 +1,6 @@
 param(
-  [string]$Output = "dist/reference-guard.xpi"
+  [string]$Output = "dist/reference-guard.xpi",
+  [string]$ZoteroId = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,7 +27,21 @@ try {
   foreach ($file in $files) {
     $source = (Resolve-Path -LiteralPath $file).Path
     $entryName = $file.Replace("\", "/")
-    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source, $entryName) | Out-Null
+    if ($file -eq "manifest.json" -and $ZoteroId) {
+      $manifest = Get-Content -Raw -LiteralPath $source | ConvertFrom-Json
+      $manifest.applications.zotero.id = $ZoteroId
+      $entry = $zip.CreateEntry($entryName)
+      $writer = New-Object System.IO.StreamWriter($entry.Open(), [System.Text.UTF8Encoding]::new($false))
+      try {
+        $writer.Write(($manifest | ConvertTo-Json -Depth 10))
+      }
+      finally {
+        $writer.Dispose()
+      }
+    }
+    else {
+      [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, $source, $entryName) | Out-Null
+    }
   }
 }
 finally {
