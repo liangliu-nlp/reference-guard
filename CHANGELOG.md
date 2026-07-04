@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.30
+
+- Require exact point-level citation hits before fallback reference jumps.
+- Stop permanent reader rescans after startup and avoid repeated successful highlight retries.
+- Remove unused whole-line/context click parsing that caused accidental jumps.
+
 ## 0.2.29
 
 - Route native PDF citation links through the same exact reference text matching used by fallback clicks.

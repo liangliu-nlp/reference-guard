@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.29";
+  const CODE_VERSION = "0.2.30";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -219,36 +219,6 @@
         filtered.push(candidate);
       }
       return filtered;
-    },
-
-    shouldUseContextForTrigger(text) {
-      text = this.cleanText(text);
-      if (!text || text.length > 140) return false;
-      return this.isCitationLike(text, "")
-        || /\bet\s+al\./i.test(text)
-        || /(?:19|20)\d{2}[a-z]?/.test(text)
-        || /^[\s\d,;()[\].\-\u2013\u2014]+$/.test(text);
-    },
-
-    parseClickReferences(text, context) {
-      let refs = this.parseReferenceTriggers(text, "");
-      if (refs.length) {
-        if (refs.some((ref) => ref.type === "author-year" && !ref.year) && this.shouldUseContextForTrigger(text)) {
-          let contextRefs = this.parseReferenceTriggers(context, "");
-          let completed = refs.map((ref) => {
-            if (ref.type !== "author-year" || ref.year) return ref;
-            return contextRefs.find((candidate) => (
-              candidate.type === "author-year"
-              && candidate.year
-              && candidate.author.toLowerCase() === ref.author.toLowerCase()
-            )) || ref;
-          });
-          if (completed.some((ref, index) => ref !== refs[index])) return completed;
-        }
-        return refs;
-      }
-      if (!this.shouldUseContextForTrigger(text)) return [];
-      return this.parseReferenceTriggers(text, context);
     }
   };
 
@@ -264,39 +234,6 @@
     catch (_) {
       return null;
     }
-  }
-
-  function nearestTextElement(element) {
-    return closest(element, ".textLayer span, .textLayer div, span") || element;
-  }
-
-  function getContext(element) {
-    let pieces = [];
-    let node = nearestTextElement(element);
-    if (!node) return "";
-
-    let length = 0;
-    for (let current = node.previousSibling; current && length < 160; current = current.previousSibling) {
-      let piece = current.textContent || "";
-      pieces.unshift(piece);
-      length += piece.length + 1;
-    }
-
-    let ownText = node.textContent || "";
-    pieces.push(ownText);
-    length += ownText.length + 1;
-
-    for (let current = node.nextSibling; current && length < 320; current = current.nextSibling) {
-      let piece = current.textContent || "";
-      pieces.push(piece);
-      length += piece.length + 1;
-    }
-
-    let text = Heuristics.cleanText(pieces.join(" "));
-    if (text.length < 12 && node.parentElement?.textContent?.length < 360) {
-      text = Heuristics.cleanText(node.parentElement.textContent);
-    }
-    return text;
   }
 
   function textLines(win, { pageNumber = null, visibleOnly = false } = {}) {
@@ -348,31 +285,6 @@
 
   function pageTextLines(win, pageNumber) {
     return textLines(win, { pageNumber });
-  }
-
-  function getPointContext(win, x, y) {
-    let pieces = [];
-    for (let element of win.document.elementsFromPoint?.(x, y) || []) {
-      let text = Heuristics.cleanText(element.textContent || element.getAttribute?.("aria-label") || element.title || "");
-      if (text && text.length < 500) pieces.push(text);
-    }
-
-    let lines = visibleTextLines(win);
-    let index = lines.findIndex((line) => (
-      y >= line.rect.top - 8
-      && y <= line.rect.bottom + 8
-      && x >= line.rect.left - 24
-      && x <= line.rect.right + 24
-    ));
-    if (index >= 0) {
-      pieces.push(lines.slice(Math.max(0, index - 1), Math.min(lines.length, index + 2)).map((line) => line.text).join(" "));
-    }
-
-    return Heuristics.cleanText(pieces.join(" "));
-  }
-
-  function combinedContext(win, event, element) {
-    return Heuristics.cleanText(`${getContext(element)} ${getPointContext(win, event.clientX, event.clientY)}`);
   }
 
   function unionRects(rects) {
@@ -533,14 +445,6 @@
     }
 
     return candidateCount ? { text: "", context, refs: [], rejected: true, candidates: candidateCount } : null;
-  }
-
-  function eventText(event) {
-    let element = elementFromTarget(event.target);
-    let node = nearestTextElement(element);
-    let text = Heuristics.cleanText(node?.textContent || element?.textContent || "");
-    if (text.length > 220) return "";
-    return text;
   }
 
   function getScrollRoot(doc) {
@@ -971,6 +875,7 @@
 
   async function scheduleNativeHighlight(win, frameState, dest, clickId) {
     let resolved = null;
+    let flashed = false;
     try {
       resolved = await resolveDestination(win, dest);
     }
@@ -978,11 +883,15 @@
       diag("nativeDest.resolveError", { message: String(e) });
     }
 
-    for (let delay of [180, 420, 900, 1500]) {
+    for (let delay of [40, 180, 420, 900]) {
       win.setTimeout(() => {
         if (frameState.clickId !== clickId) return;
-        if (resolved && flashDestination(win, resolved)) return;
-        if (!resolved) flashLanding(win);
+        if (flashed) return;
+        if (resolved && flashDestination(win, resolved)) {
+          flashed = true;
+          return;
+        }
+        if (!resolved && flashLanding(win)) flashed = true;
       }, delay);
     }
   }
@@ -1031,16 +940,6 @@
     }
   }
 
-  function scheduleLandingHighlight(win, frameState, clickId, expectedPage) {
-    for (let delay of [120, 420, 900]) {
-      win.setTimeout(() => {
-        if (frameState.clickId !== clickId) return;
-        if (expectedPage && currentPageNumber(win) !== expectedPage) return;
-        flashLanding(win);
-      }, delay);
-    }
-  }
-
   function visibleReferenceGroup(win, ref) {
     let lines = visibleTextLines(win);
     let matchesLine = referenceLineMatcher(ref);
@@ -1061,9 +960,11 @@
   }
 
   function scheduleVisibleReferenceHighlight(win, frameState, refs, clickId, expectedPage) {
-    for (let delay of [140, 420, 900]) {
+    let flashed = false;
+    for (let delay of [40, 180, 420]) {
       win.setTimeout(() => {
         if (frameState.clickId !== clickId) return;
+        if (flashed) return;
         if (expectedPage && currentPageNumber(win) !== expectedPage) return;
         for (let ref of refs) {
           let group = visibleReferenceGroup(win, ref);
@@ -1077,6 +978,7 @@
           })).filter((rect) => rect.right - rect.left > 2);
           flashRects(win, rects, 4200);
           diag("fallback.visiblePageChangeHit", { ref, page: currentPageNumber(win), lines: group.length });
+          flashed = true;
           return;
         }
         diag("fallback.visiblePageChangeMiss", { page: currentPageNumber(win), refs });
@@ -1084,10 +986,10 @@
     }
   }
 
-  function clickReferences(citationHit, text, context) {
-    return citationHit?.refs?.length
+  function clickReferences(citationHit) {
+    return citationHit && !citationHit.rejected && citationHit.refs?.length
       ? citationHit.refs
-      : Heuristics.parseClickReferences(text, context);
+      : [];
   }
 
   function diagFallbackClick(click, refs, extra) {
@@ -1408,25 +1310,33 @@
 
   function scheduleMatchHighlight(win, frameState, match, clickId) {
     let scrolled = false;
-    for (let delay of [160, 420, 900, 1500]) {
+    let flashed = false;
+    for (let delay of [0, 120, 420, 900]) {
       win.setTimeout(() => {
         if (frameState.clickId !== clickId) return;
+        if (flashed) return;
         if (!scrolled) {
           scrolled = scrollToMatch(win, match);
         }
         afterPaint(win, () => {
           if (frameState.clickId !== clickId) return;
+          if (flashed) return;
           let rects = lineRects(win, match);
           if (rects.length) {
             flashRects(win, rects, 4200);
+            flashed = true;
             return;
           }
           if (currentPageNumber(win) !== match.page.pageNumber) {
             navigateToPage(win, match.page.pageNumber).then((ok) => {
               if (!ok || frameState.clickId !== clickId) return;
+              if (flashed) return;
               scrolled = scrollToMatch(win, match);
               let retryRects = lineRects(win, match);
-              if (retryRects.length) flashRects(win, retryRects, 4200);
+              if (retryRects.length) {
+                flashRects(win, retryRects, 4200);
+                flashed = true;
+              }
             });
             return;
           }
@@ -1441,8 +1351,8 @@
     }
   }
 
-  async function resolveFallback(win, frameState, refs, clickId, beforePage) {
-    await wait(win, 220);
+  async function resolveFallback(win, frameState, refs, clickId, beforePage, { nativePending = false } = {}) {
+    if (nativePending) await wait(win, 70);
     if (frameState.clickId !== clickId) return;
     let currentPage = currentPageNumber(win);
     let nativeChangedTo = null;
@@ -1453,6 +1363,11 @@
 
     let pages = await getPDFTextPages(win, frameState);
     if (frameState.clickId !== clickId) return;
+    currentPage = currentPageNumber(win);
+    if (!nativeChangedTo && beforePage && currentPage && currentPage !== beforePage) {
+      diag("fallback.lateNativePageChange", { from: beforePage, to: currentPage, refs });
+      nativeChangedTo = currentPage;
+    }
 
     for (let ref of refs) {
       let match = findReferenceMatch(pages, ref);
@@ -1496,7 +1411,7 @@
       return;
     }
 
-    let refs = clickReferences(click.citationHit, click.text, click.context);
+    let refs = clickReferences(click.citationHit);
     if (!refs.length) return;
 
     let nativeLink = null;
@@ -1518,7 +1433,7 @@
       });
       openNativeDestination(win, nativeLink.dest, { history: true }).catch(logError);
       diagFallbackClick(click, refs, { native: true });
-      await resolveFallback(win, frameState, refs, click.clickId, click.beforePage);
+      await resolveFallback(win, frameState, refs, click.clickId, click.beforePage, { nativePending: true });
       return;
     }
 
@@ -1608,7 +1523,17 @@
       let observer = new win.MutationObserver(scan);
       observer.observe(win.document.documentElement, { childList: true, subtree: true });
       win.addEventListener("load", scan, true);
-      let scanTimer = win.setInterval(scan, 1000);
+      let scanAttempts = 0;
+      let scanTimer = win.setInterval(() => {
+        scan();
+        scanAttempts++;
+        if (scanAttempts >= 30) {
+          win.clearInterval(scanTimer);
+          let entry = this.windows.get(win);
+          if (entry) entry.scanTimer = null;
+        }
+      }, 1000);
+      // ponytail: bounded startup retry; MutationObserver/load handle later reader changes.
       this.windows.set(win, { observer, scan, scanTimer, frames: new Set() });
       scan();
     },
@@ -1619,7 +1544,7 @@
 
       entry.observer.disconnect();
       win.removeEventListener("load", entry.scan, true);
-      win.clearInterval(entry.scanTimer);
+      if (entry.scanTimer) win.clearInterval(entry.scanTimer);
       for (let frameWin of entry.frames) {
         this.removeFromFrame(frameWin);
       }
@@ -1725,10 +1650,18 @@
         let nativeLink = nativeLinkAtPoint(win, event.clientX, event.clientY, element);
         if (nativeLink) {
           let citationHit = citationHitAtPoint(win, event.clientX, event.clientY);
-          let text = citationHit && !citationHit.rejected ? citationHit.text : eventText(event);
-          let context = citationHit?.context || combinedContext(win, event, element);
+          let refs = clickReferences(citationHit);
+          if (!refs.length) {
+            let clickId = ++frameState.clickId;
+            if (nativeLink.direct) {
+              scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
+            }
+            return;
+          }
+
+          let text = citationHit.text;
+          let context = citationHit?.context || "";
           let beforePage = currentPageNumber(win);
-          let refs = citationHit?.rejected ? [] : clickReferences(citationHit, text, context);
           let clickId = ++frameState.clickId;
           diag("nativeLink.click", {
             page: beforePage,
@@ -1754,7 +1687,7 @@
               context,
               citationHit
             }, refs, { native: true });
-            resolveFallback(win, frameState, refs, clickId, beforePage).catch((e) => this.log(e));
+            resolveFallback(win, frameState, refs, clickId, beforePage, { nativePending: true }).catch((e) => this.log(e));
           }
           else {
             scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
@@ -1767,8 +1700,12 @@
         frameState.lastClickAt = now;
 
         let citationHit = citationHitAtPoint(win, event.clientX, event.clientY);
-        let text = citationHit && !citationHit.rejected ? citationHit.text : eventText(event);
-        let context = citationHit?.context || combinedContext(win, event, element);
+        if (!citationHit) {
+          frameState.clickId++;
+          return;
+        }
+        let text = citationHit.rejected ? "" : citationHit.text;
+        let context = citationHit.context || "";
         let clickId = ++frameState.clickId;
         resolveNonDomClick(win, frameState, {
           clickId,
@@ -1817,7 +1754,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       ReferenceGuardHeuristics: Heuristics,
-      ReferenceGuardTestHooks: { findReferenceMatch, itemLines }
+      ReferenceGuardTestHooks: { clickReferences, findReferenceMatch, itemLines }
     };
   }
 })();

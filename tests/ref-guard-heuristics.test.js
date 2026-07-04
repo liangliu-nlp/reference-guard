@@ -92,40 +92,13 @@ assert.strictEqual(
 );
 
 assert.deepStrictEqual(
-  h.parseClickReferences("8", "predefined correction instructions [ 8 ] to process-based supervision"),
-  [{ type: "number", number: "8", label: "8" }],
-  "parses bare numeric clicks inside spaced bracketed citations"
-);
-
-assert.deepStrictEqual(
   h.parseReferenceTriggers("1", "L(theta) = 1 / N sum_n log p_theta(y_n | x_n)"),
   [],
   "does not parse formula numbers"
 );
 
 assert.deepStrictEqual(
-  h.parseClickReferences("(LLMs) have demonstrated a paradigm shift from", "Recent advancements follow Snell et al., 2024a; Kumar et al., 2024."),
-  [],
-  "does not use citation context for non-citation prose clicks"
-);
-
-assert.deepStrictEqual(
-  h.parseClickReferences("2024). Even when inputs fit", "the growth of the KV cache (Hooper et al., 2024). Even when"),
-  [{ type: "author-year", author: "Hooper", year: "2024", label: "Hooper et al., 2024)" }],
-  "uses context for year-fragment citation clicks"
-);
-
-assert.deepStrictEqual(
-  h.parseClickReferences(
-    "making inference increasingly constrained by memory and latency due to the growth of the KV cache (Hooper et al.,",
-    "making inference increasingly constrained by memory and latency due to the growth of the KV cache (Hooper et al., 2024). Even when inputs fit within the model's maximum context window, Liu et al., 2024b"
-  ),
-  [{ type: "author-year", author: "Hooper", year: "2024", label: "Hooper et al., 2024)" }],
-  "uses context to complete same-author partial author-year clicks"
-);
-
-assert.deepStrictEqual(
-  h.parseClickReferences("information distributed across long contexts (Liu et al., 2024b; An et al., 2025).", ""),
+  h.parseReferenceTriggers("information distributed across long contexts (Liu et al., 2024b; An et al., 2025).", ""),
   [
     { type: "author-year", author: "Liu", year: "2024", label: "Liu et al., 2024b", suffix: "b" },
     { type: "author-year", author: "An", year: "2025", label: "An et al., 2025)" }
@@ -155,6 +128,26 @@ assert.deepStrictEqual(
   h.citationCandidates("limited by sparse supervision [6, 15].")[0].refs,
   [{ type: "number", number: "6", label: "[6, 15]" }, { type: "number", number: "15", label: "[6, 15]" }],
   "extracts point-level numeric citation groups"
+);
+
+let exactClickRefs = [{ type: "author-year", author: "Guo", year: "2025", label: "Guo et al., 2025" }];
+
+assert.deepStrictEqual(
+  hooks.clickReferences({ rejected: false, refs: exactClickRefs }),
+  exactClickRefs,
+  "uses exact point-level citation hits"
+);
+
+assert.deepStrictEqual(
+  hooks.clickReferences(null),
+  [],
+  "does not infer references from a whole clicked text line"
+);
+
+assert.deepStrictEqual(
+  hooks.clickReferences({ rejected: true, refs: [] }),
+  [],
+  "does not jump when the click is near but outside a citation"
 );
 
 function pdfLine(str, x, y) {
