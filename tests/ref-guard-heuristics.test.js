@@ -150,6 +150,49 @@ assert.deepStrictEqual(
   "does not jump when the click is near but outside a citation"
 );
 
+assert.strictEqual(
+  hooks.isClearlyNonReferenceDestination("figure.1"),
+  true,
+  "skips clearly non-reference PDF destinations"
+);
+
+assert.strictEqual(
+  hooks.isClearlyNonReferenceDestination("bib.bib10"),
+  false,
+  "keeps bibliography-like PDF destinations"
+);
+
+assert.strictEqual(
+  hooks.visibleLinesLookLikeReferences([
+    { text: "lizing a large teacher model's thoughts to supervise and correct both the reasoning and reflection processes." },
+    { text: "As depicted in Figure 1, in the first stage we design a cross-model teacher-student workflow." },
+    { text: "Prior work such as Reflexion (Shinn et al., 2024) studies verbal reinforcement learning." }
+  ]),
+  false,
+  "does not treat a body page with one visible citation as a references page"
+);
+
+assert.strictEqual(
+  hooks.visibleLinesLookLikeReferences([
+    { text: "References" },
+    { text: "Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao." }
+  ]),
+  true,
+  "recognizes an explicit references heading"
+);
+
+assert.strictEqual(
+  hooks.visibleLinesLookLikeReferences([
+    { text: "Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao." },
+    { text: "Reflexion: Language agents with verbal reinforcement learning. NeurIPS, 2024." },
+    { text: "Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, and Mingchuan Zhang." },
+    { text: "Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning, 2025." },
+    { text: "Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Carroll L. Wainwright, and Pamela Mishkin." }
+  ]),
+  true,
+  "recognizes dense author-list reference pages without a visible heading"
+);
+
 function pdfLine(str, x, y) {
   return {
     str,

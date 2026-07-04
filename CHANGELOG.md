@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.41
+
+- Skip clearly non-reference PDF destinations such as figures, tables, equations, and sections.
+- Only allow post-jump visible-reference highlighting on pages that look like a bibliography/reference page.
+
 ## 0.2.40
 
 - Stop no-citation native links such as figures from flashing destination highlights.

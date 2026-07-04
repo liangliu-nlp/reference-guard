@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.40";
+  const CODE_VERSION = "0.2.41";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -833,6 +833,20 @@
     return null;
   }
 
+  function looksLikeVisibleReferenceStart(line) {
+    return looksLikeNumberedReferenceStart(line.text)
+      || /^[A-Z][A-Za-z'\u2019.-]+(?:-[A-Z][A-Za-z'\u2019.-]+)?\s+(?:[A-Z](?:[A-Za-z'\u2019.-]+|\.)?|and\b)/.test(line.text);
+  }
+
+  function visiblePageLooksLikeReferences(win) {
+    return visibleLinesLookLikeReferences(visibleTextLines(win));
+  }
+
+  function visibleLinesLookLikeReferences(lines) {
+    if (lines.some((line) => /\b(references|bibliography)\b/i.test(line.text))) return true;
+    return lines.filter(looksLikeVisibleReferenceStart).length >= 3;
+  }
+
   function scheduleVisibleReferenceHighlight(win, frameState, refs, clickId, expectedPage) {
     let flashed = false;
     for (let delay of [40, 180, 420]) {
@@ -964,6 +978,10 @@
   }
 
   function flashVisibleReference(win, refs) {
+    if (!visiblePageLooksLikeReferences(win)) {
+      diag("pageChangeReferenceSkip", { page: currentPageNumber(win), reason: "target-not-references", refs: refs?.length || 0 });
+      return false;
+    }
     for (let ref of refs || []) {
       let group = visibleReferenceGroup(win, ref);
       if (!group) continue;
@@ -1394,6 +1412,16 @@
     }
   }
 
+  function destinationName(dest) {
+    if (typeof dest === "string") return dest;
+    return "";
+  }
+
+  function isClearlyNonReferenceDestination(dest) {
+    let name = destinationName(dest).toLowerCase();
+    return /(?:^|[.#/_-])(?:fig(?:ure)?|table|tbl|equation|eq|section|sec|appendix|algorithm|alg)(?:[.#/_-]|\d|$)/.test(name);
+  }
+
   async function resolveNonDomClick(win, frameState, click, logError) {
     if (click.citationHit?.rejected) {
       diag("fallback.pointReject", {
@@ -1458,6 +1486,13 @@
         href: clip(nativeLink.href, 220),
         dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest
       });
+      if (isClearlyNonReferenceDestination(nativeLink.dest)) {
+        diag("nativeAnnotation.skipNonReferenceDestination", {
+          page: click.beforePage,
+          dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest
+        });
+        return;
+      }
     }
 
     schedulePageChangeHighlight(win, frameState, click.clickId, click.beforePage, await passiveClickReferences(win, frameState, click));
@@ -1800,7 +1835,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       ReferenceGuardHeuristics: Heuristics,
-      ReferenceGuardTestHooks: { clickReferences, findReferenceMatch, itemLines }
+      ReferenceGuardTestHooks: { clickReferences, findReferenceMatch, isClearlyNonReferenceDestination, itemLines, visibleLinesLookLikeReferences }
     };
   }
 })();
