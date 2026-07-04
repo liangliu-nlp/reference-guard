@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.40
+
+- Stop no-citation native links such as figures from flashing destination highlights.
+- Ignore backward page changes so Zotero back navigation does not trigger reference highlighting.
+- Require a visible reference match before post-jump fallback highlighting.
+
 ## 0.2.39
 
 - Keep more source-page citation hints for post-jump visible-reference matching.

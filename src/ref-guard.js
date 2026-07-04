@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.39";
+  const CODE_VERSION = "0.2.40";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -721,39 +721,9 @@
     diag("flashRects", { page: currentPageNumber(win), requested: rects.length, appended, pageAnchored });
   }
 
-  function flashLines(win, lines, duration) {
-    flashRects(win, lines.map((line) => line.rect).filter(Boolean), duration);
-  }
-
   function sameColumn(base, line) {
     let overlap = Math.min(base.rect.right, line.rect.right) - Math.max(base.rect.left, line.rect.left);
     return overlap > 12 || Math.abs(base.rect.left - line.rect.left) < 36;
-  }
-
-  function flashLanding(win) {
-    let lines = visibleTextLines(win);
-    if (!lines.length) return false;
-
-    let targetY = win.innerHeight * 0.30;
-    let bestIndex = 0;
-    let bestScore = Infinity;
-    for (let i = 0; i < lines.length; i++) {
-      let score = Math.abs(lines[i].rect.top - targetY);
-      if (lines[i].rect.top < 55) score += 100;
-      if (score < bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
-    }
-
-    let base = lines[bestIndex];
-    let group = [base];
-    for (let i = bestIndex + 1; i < lines.length && group.length < 3; i++) {
-      if (sameColumn(base, lines[i])) group.push(lines[i]);
-    }
-    flashLines(win, group, 3200);
-    diag("flashLanding", { page: currentPageNumber(win), lines: group.length });
-    return true;
   }
 
   async function resolveDestination(win, dest) {
@@ -784,127 +754,6 @@
     return { pageNumber, destArray: explicitDest };
   }
 
-  function destinationPoint(win, resolved) {
-    let app = unwrap(getPDFApplication(win));
-    let pdfViewer = unwrap(app?.pdfViewer);
-    let pageView = unwrap(pdfViewer?.getPageView?.(resolved.pageNumber - 1));
-    let viewport = unwrap(pageView?.viewport);
-    let pageDiv = pageView?.div || win.document.querySelector(`.page[data-page-number="${resolved.pageNumber}"]`);
-    if (!viewport?.convertToViewportPoint || !pageDiv) return null;
-
-    let dest = resolved.destArray;
-    let destType = unwrap(dest[1]);
-    let type = destType?.name || String(destType || "").replace("/", "");
-    let x = 0;
-    let y = null;
-
-    if (type === "XYZ") {
-      x = typeof dest[2] === "number" ? dest[2] : 0;
-      y = typeof dest[3] === "number" ? dest[3] : null;
-    }
-    else if (type === "FitH" || type === "FitBH") {
-      y = typeof dest[2] === "number" ? dest[2] : null;
-    }
-    else if (type === "FitR") {
-      x = typeof dest[2] === "number" ? dest[2] : 0;
-      y = typeof dest[3] === "number" ? dest[3] : null;
-    }
-    if (y === null) return null;
-
-    let point = viewport.convertToViewportPoint(x, y);
-    let pageRect = pageDiv.getBoundingClientRect();
-    return {
-      x: pageRect.left + point[0],
-      y: pageRect.top + point[1],
-      pageDiv
-    };
-  }
-
-  function rectVisible(win, rect) {
-    return !!rect
-      && rect.bottom >= 55
-      && rect.top <= win.innerHeight - 15
-      && rect.right >= 0
-      && rect.left <= win.innerWidth;
-  }
-
-  function flashDestination(win, resolved) {
-    if (!resolved) return false;
-
-    let point = destinationPoint(win, resolved);
-    if (!point) return flashLanding(win);
-    if (!rectVisible(win, point.pageDiv.getBoundingClientRect())) return false;
-
-    let lines = pageTextLines(win, resolved.pageNumber).filter((line) => (
-      line.rect.bottom >= 55
-      && line.rect.top <= win.innerHeight - 15
-      && line.page === point.pageDiv
-    ));
-    if (!lines.length) {
-      flashRects(win, [{
-        left: point.x,
-        top: point.y - 12,
-        right: point.x + Math.min(360, win.innerWidth * 0.5),
-        bottom: point.y + 28
-      }], 3200);
-      return true;
-    }
-
-    let bestIndex = 0;
-    let bestScore = Infinity;
-    for (let i = 0; i < lines.length; i++) {
-      let line = lines[i];
-      let yScore = Math.abs(line.rect.top - point.y);
-      let xScore = point.x > line.rect.right + 24 || point.x < line.rect.left - 80 ? 35 : 0;
-      let score = yScore + xScore;
-      if (score < bestScore) {
-        bestScore = score;
-        bestIndex = i;
-      }
-    }
-
-    let base = lines[bestIndex];
-    let group = [base];
-    for (let i = bestIndex + 1; i < lines.length && group.length < 4; i++) {
-      if (sameColumn(base, lines[i])) group.push(lines[i]);
-    }
-    flashLines(win, group, 3600);
-    diag("flashDestination", { page: resolved.pageNumber, lines: group.length });
-    return true;
-  }
-
-  async function scheduleNativeHighlight(win, frameState, dest, clickId, beforePage = currentPageNumber(win)) {
-    let resolved = null;
-    let flashed = false;
-    try {
-      resolved = await resolveDestination(win, dest);
-    }
-    catch (e) {
-      diag("nativeDest.resolveError", { message: String(e) });
-    }
-
-    let delays = [80, 180, 420, 900, 1500, 2400];
-    for (let delay of delays) {
-      win.setTimeout(() => {
-        if (frameState.clickId !== clickId) return;
-        if (flashed) return;
-        let page = currentPageNumber(win);
-        let pageChanged = beforePage && page && page !== beforePage;
-        if (resolved && flashDestination(win, resolved)) {
-          flashed = true;
-          return;
-        }
-        if (pageChanged && flashLanding(win)) {
-          flashed = true;
-          return;
-        }
-        if (delay === delays[delays.length - 1]) {
-          diag("nativeHighlight.miss", { page, beforePage, resolvedPage: resolved?.pageNumber || null });
-        }
-      }, delay);
-    }
-  }
-
   function schedulePageChangeHighlight(win, frameState, clickId, beforePage, refs = []) {
     if (!beforePage) return;
     let flashed = false;
@@ -913,7 +762,7 @@
       win.setTimeout(() => {
         if (frameState.clickId !== clickId || flashed) return;
         let page = currentPageNumber(win);
-        if (page && page !== beforePage && (flashVisibleReference(win, refs) || flashLanding(win))) {
+        if (page && page > beforePage && refs.length && flashVisibleReference(win, refs)) {
           flashed = true;
           diag("pageChangeHighlight", { from: beforePage, to: page, refs: refs.length });
         }
@@ -1593,7 +1442,7 @@
     await resolveFallback(win, frameState, refs, click.clickId, click.beforePage);
   }
 
-  async function resolveUnrecognizedClick(win, frameState, click, logError) {
+  async function resolveUnrecognizedClick(win, frameState, click) {
     let nativeLink = null;
     try {
       nativeLink = await nativeAnnotationAtPoint(win, click.x, click.y, click.element);
@@ -1609,8 +1458,6 @@
         href: clip(nativeLink.href, 220),
         dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest
       });
-      scheduleNativeHighlight(win, frameState, nativeLink.dest, click.clickId, click.beforePage).catch(logError);
-      return;
     }
 
     schedulePageChangeHighlight(win, frameState, click.clickId, click.beforePage, await passiveClickReferences(win, frameState, click));
@@ -1829,6 +1676,15 @@
           if (!refs.length) {
             let clickId = ++frameState.clickId;
             let beforePage = currentPageNumber(win);
+            let click = {
+              clickId,
+              beforePage,
+              x: event.clientX,
+              y: event.clientY,
+              element,
+              passiveRefs: citationHit?.context ? passiveReferences(citationHit.context, 40) : passiveReferencesNearPoint(win, event.clientX, event.clientY),
+              sourceGeometry: sourcePageGeometry(win, element, beforePage)
+            };
             diag("nativeLink.noCitation", {
               page: beforePage,
               href: clip(nativeLink.href, 220),
@@ -1836,9 +1692,9 @@
               direct: nativeLink.direct,
               rejected: !!citationHit?.rejected
             });
-            if (nativeLink.dest) {
-              scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId, beforePage).catch((e) => this.log(e));
-            }
+            passiveClickReferences(win, frameState, click)
+              .then((passiveRefs) => schedulePageChangeHighlight(win, frameState, clickId, beforePage, passiveRefs))
+              .catch((e) => this.log(e));
             return;
           }
 
@@ -1861,20 +1717,15 @@
           else if (!nativeLink.direct) {
             openNativeDestination(win, nativeLink.dest).catch((e) => this.log(e));
           }
-          if (refs.length) {
-            diagFallbackClick({
-              beforePage,
-              x: event.clientX,
-              y: event.clientY,
-              text,
-              context,
-              citationHit
-            }, refs, { native: true });
-            resolveFallback(win, frameState, refs, clickId, beforePage, { nativePending: true }).catch((e) => this.log(e));
-          }
-          else {
-            scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId, beforePage).catch((e) => this.log(e));
-          }
+          diagFallbackClick({
+            beforePage,
+            x: event.clientX,
+            y: event.clientY,
+            text,
+            context,
+            citationHit
+          }, refs, { native: true });
+          resolveFallback(win, frameState, refs, clickId, beforePage, { nativePending: true }).catch((e) => this.log(e));
           return;
         }
 
@@ -1894,7 +1745,7 @@
             element,
             passiveRefs: passiveReferencesNearPoint(win, event.clientX, event.clientY),
             sourceGeometry: sourcePageGeometry(win, element, beforePage)
-          }, (e) => this.log(e)).catch((e) => this.log(e));
+          }).catch((e) => this.log(e));
           return;
         }
         let text = citationHit.rejected ? "" : citationHit.text;
