@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.2.30";
+  const CODE_VERSION = "0.2.39";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
@@ -608,6 +608,7 @@
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
       }) || win.document.querySelector(`.page[data-page-number="${currentPageNumber(win)}"]`);
     }
+    let pageRect = pageDiv.getBoundingClientRect();
     let pageNumber = Number(pageDiv?.dataset?.pageNumber) || currentPageNumber(win);
     if (!pageNumber) return null;
 
@@ -627,7 +628,6 @@
     }
     catch (_) {}
 
-    let pageRect = pageDiv.getBoundingClientRect();
     for (let index = 0; index < length; index++) {
       let annotation = null;
       try {
@@ -873,7 +873,7 @@
     return true;
   }
 
-  async function scheduleNativeHighlight(win, frameState, dest, clickId) {
+  async function scheduleNativeHighlight(win, frameState, dest, clickId, beforePage = currentPageNumber(win)) {
     let resolved = null;
     let flashed = false;
     try {
@@ -883,15 +883,40 @@
       diag("nativeDest.resolveError", { message: String(e) });
     }
 
-    for (let delay of [40, 180, 420, 900]) {
+    let delays = [80, 180, 420, 900, 1500, 2400];
+    for (let delay of delays) {
       win.setTimeout(() => {
         if (frameState.clickId !== clickId) return;
         if (flashed) return;
+        let page = currentPageNumber(win);
+        let pageChanged = beforePage && page && page !== beforePage;
         if (resolved && flashDestination(win, resolved)) {
           flashed = true;
           return;
         }
-        if (!resolved && flashLanding(win)) flashed = true;
+        if (pageChanged && flashLanding(win)) {
+          flashed = true;
+          return;
+        }
+        if (delay === delays[delays.length - 1]) {
+          diag("nativeHighlight.miss", { page, beforePage, resolvedPage: resolved?.pageNumber || null });
+        }
+      }, delay);
+    }
+  }
+
+  function schedulePageChangeHighlight(win, frameState, clickId, beforePage, refs = []) {
+    if (!beforePage) return;
+    let flashed = false;
+    let delays = [120, 300, 700, 1200, 2000, 3000];
+    for (let delay of delays) {
+      win.setTimeout(() => {
+        if (frameState.clickId !== clickId || flashed) return;
+        let page = currentPageNumber(win);
+        if (page && page !== beforePage && (flashVisibleReference(win, refs) || flashLanding(win))) {
+          flashed = true;
+          diag("pageChangeHighlight", { from: beforePage, to: page, refs: refs.length });
+        }
       }, delay);
     }
   }
@@ -990,6 +1015,121 @@
     return citationHit && !citationHit.rejected && citationHit.refs?.length
       ? citationHit.refs
       : [];
+  }
+
+  function passiveReferences(context, limit = 8) {
+    return Heuristics.parseReferenceTriggers("", context).slice(0, limit);
+  }
+
+  function passiveReferencesNearPoint(win, x, y) {
+    let all = visibleTextLines(win);
+    let lines = all.filter((line) => y >= line.rect.top - 36 && y <= line.rect.bottom + 36);
+    if (!lines.length) {
+      lines = all.sort((a, b) => (
+        Math.abs((a.rect.top + a.rect.bottom) / 2 - y)
+        - Math.abs((b.rect.top + b.rect.bottom) / 2 - y)
+      )).slice(0, 3);
+    }
+    let context = lines.map((line) => line.text).join(" ");
+    let refs = passiveReferences(context);
+    if (refs.length) diag("passiveRefs", { refs: refs.length, context: clip(context) });
+    return refs;
+  }
+
+  function sourcePageGeometry(win, element, pageNumber) {
+    let pageDiv = closest(element, ".page") || win.document.querySelector(`.page[data-page-number="${pageNumber}"]`);
+    let app = unwrap(getPDFApplication(win));
+    let pdfViewer = unwrap(app?.pdfViewer);
+    let pageView = unwrap(pdfViewer?.getPageView?.(pageNumber - 1));
+    let viewport = unwrap(pageView?.viewport);
+    let rect = pageDiv?.getBoundingClientRect?.();
+    if (!viewport?.convertToViewportPoint || !rect) return null;
+    return {
+      pageNumber,
+      viewport,
+      pageRect: {
+        left: rect.left,
+        top: rect.top,
+        right: rect.right,
+        bottom: rect.bottom
+      }
+    };
+  }
+
+  function pdfLineScreenRect(line, geometry) {
+    let rect = null;
+    for (let item of line.items || []) {
+      if (!item.str) continue;
+      let point = geometry.viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
+      let scale = geometry.viewport.scale || 1;
+      let height = Math.max(8, (item.height || Math.abs(item.transform[3]) || 9) * scale);
+      let width = Math.max(3, (item.width || item.str.length * 5) * scale);
+      let itemRect = {
+        left: geometry.pageRect.left + point[0],
+        top: geometry.pageRect.top + point[1] - height,
+        right: geometry.pageRect.left + point[0] + width,
+        bottom: geometry.pageRect.top + point[1] + 2
+      };
+      rect = rect ? unionRects([rect, itemRect]) : itemRect;
+    }
+    return rect;
+  }
+
+  async function passiveReferencesFromPDFPoint(win, frameState, geometry, x, y) {
+    if (!geometry) {
+      diag("passivePdfRefs.miss", { reason: "no-geometry" });
+      return [];
+    }
+    let pages = await getPDFTextPages(win, frameState);
+    let page = pages.find((candidate) => candidate.pageNumber === geometry.pageNumber);
+    if (!page) {
+      diag("passivePdfRefs.miss", { reason: "no-page", page: geometry.pageNumber });
+      return [];
+    }
+
+    let lines = itemLines(page).map((line) => ({
+      line,
+      rect: pdfLineScreenRect(line, geometry)
+    })).filter((entry) => entry.rect);
+    let nearby = lines.filter((entry) => (
+      y >= entry.rect.top - 42
+      && y <= entry.rect.bottom + 42
+      && x >= entry.rect.left - 120
+      && x <= entry.rect.right + 120
+    ));
+    if (!nearby.length) {
+      nearby = lines.sort((a, b) => (
+        Math.abs((a.rect.top + a.rect.bottom) / 2 - y)
+        - Math.abs((b.rect.top + b.rect.bottom) / 2 - y)
+      )).slice(0, 3);
+    }
+
+    let context = nearby.map((entry) => entry.line.text).join(" ");
+    let refs = passiveReferences(context);
+    if (refs.length) diag("passivePdfRefs", { refs: refs.length, context: clip(context) });
+    else {
+      refs = passiveReferences(page.text, 40);
+      diag("passivePdfRefs.miss", { reason: "line-no-refs", lines: nearby.length, pageRefs: refs.length, context: clip(context) });
+    }
+    return refs;
+  }
+
+  function flashVisibleReference(win, refs) {
+    for (let ref of refs || []) {
+      let group = visibleReferenceGroup(win, ref);
+      if (!group) continue;
+      let baseRect = group[0].rect;
+      let rects = group.map((line) => ({
+        left: Math.min(baseRect.left, line.rect.left),
+        top: line.rect.top,
+        right: line.rect.right,
+        bottom: line.rect.bottom
+      })).filter((rect) => rect.right - rect.left > 2);
+      flashRects(win, rects, 4200);
+      diag("pageChangeReferenceHit", { ref, page: currentPageNumber(win), lines: group.length });
+      return true;
+    }
+    return false;
   }
 
   function diagFallbackClick(click, refs, extra) {
@@ -1394,6 +1534,17 @@
     }
   }
 
+  async function passiveClickReferences(win, frameState, click) {
+    if (click.passiveRefs?.length) return click.passiveRefs;
+    try {
+      return await passiveReferencesFromPDFPoint(win, frameState, click.sourceGeometry, click.x, click.y);
+    }
+    catch (e) {
+      diag("passivePdfRefs.error", { message: String(e) });
+      return [];
+    }
+  }
+
   async function resolveNonDomClick(win, frameState, click, logError) {
     if (click.citationHit?.rejected) {
       diag("fallback.pointReject", {
@@ -1403,6 +1554,7 @@
         candidates: click.citationHit.candidates,
         context: clip(click.citationHit.context)
       });
+      schedulePageChangeHighlight(win, frameState, click.clickId, click.beforePage, await passiveClickReferences(win, frameState, click));
       return;
     }
 
@@ -1439,6 +1591,29 @@
 
     diagFallbackClick(click, refs);
     await resolveFallback(win, frameState, refs, click.clickId, click.beforePage);
+  }
+
+  async function resolveUnrecognizedClick(win, frameState, click, logError) {
+    let nativeLink = null;
+    try {
+      nativeLink = await nativeAnnotationAtPoint(win, click.x, click.y, click.element);
+    }
+    catch (e) {
+      diag("nativeAnnotation.error", { message: String(e) });
+    }
+    if (frameState.clickId !== click.clickId) return;
+
+    if (nativeLink?.dest) {
+      diag("nativeAnnotation.noCitation", {
+        page: click.beforePage,
+        href: clip(nativeLink.href, 220),
+        dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest
+      });
+      scheduleNativeHighlight(win, frameState, nativeLink.dest, click.clickId, click.beforePage).catch(logError);
+      return;
+    }
+
+    schedulePageChangeHighlight(win, frameState, click.clickId, click.beforePage, await passiveClickReferences(win, frameState, click));
   }
 
   function removeOverlays(doc) {
@@ -1653,8 +1828,16 @@
           let refs = clickReferences(citationHit);
           if (!refs.length) {
             let clickId = ++frameState.clickId;
-            if (nativeLink.direct) {
-              scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
+            let beforePage = currentPageNumber(win);
+            diag("nativeLink.noCitation", {
+              page: beforePage,
+              href: clip(nativeLink.href, 220),
+              dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest,
+              direct: nativeLink.direct,
+              rejected: !!citationHit?.rejected
+            });
+            if (nativeLink.dest) {
+              scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId, beforePage).catch((e) => this.log(e));
             }
             return;
           }
@@ -1690,7 +1873,7 @@
             resolveFallback(win, frameState, refs, clickId, beforePage, { nativePending: true }).catch((e) => this.log(e));
           }
           else {
-            scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId).catch((e) => this.log(e));
+            scheduleNativeHighlight(win, frameState, nativeLink.dest, clickId, beforePage).catch((e) => this.log(e));
           }
           return;
         }
@@ -1701,7 +1884,17 @@
 
         let citationHit = citationHitAtPoint(win, event.clientX, event.clientY);
         if (!citationHit) {
-          frameState.clickId++;
+          let clickId = ++frameState.clickId;
+          let beforePage = currentPageNumber(win);
+          resolveUnrecognizedClick(win, frameState, {
+            clickId,
+            beforePage,
+            x: event.clientX,
+            y: event.clientY,
+            element,
+            passiveRefs: passiveReferencesNearPoint(win, event.clientX, event.clientY),
+            sourceGeometry: sourcePageGeometry(win, element, beforePage)
+          }, (e) => this.log(e)).catch((e) => this.log(e));
           return;
         }
         let text = citationHit.rejected ? "" : citationHit.text;
@@ -1715,7 +1908,9 @@
           element,
           text,
           context,
-          citationHit
+          citationHit,
+          passiveRefs: passiveReferences(citationHit.context),
+          sourceGeometry: sourcePageGeometry(win, element, currentPageNumber(win))
         }, (e) => this.log(e)).catch((e) => this.log(e));
       };
 

@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.2.39
+
+- Keep more source-page citation hints for post-jump visible-reference matching.
+
+## 0.2.38
+
+- When source-line PDF coordinate matching misses, use source-page citations only as post-jump visible-reference hints.
+
+## 0.2.37
+
+- Add focused diagnostics for PDF textContent source-line fallback misses.
+
+## 0.2.36
+
+- Fall back to PDF textContent for source-line citation hints when Zotero renders the source page without a DOM text layer.
+
+## 0.2.35
+
+- Broaden passive source-line capture for PDF annotation clicks so split text layers still provide citation hints.
+
+## 0.2.34
+
+- Use nearby source citation text only after Zotero has already changed pages, improving highlight precision without reintroducing fallback jumps.
+
+## 0.2.33
+
+- Use PDF annotation destinations for clicks that Zotero handles without a text-layer citation hit.
+- Keep the source annotation geometry stable while Zotero is changing pages.
+
+## 0.2.32
+
+- Flash the landing area when Zotero handles an unrecognized native PDF link and the page changes.
+
+## 0.2.31
+
+- Restore longer native-link highlight retries after Zotero page jumps.
+- Add diagnostics for native PDF links that jump without an exact citation-text hit.
+
 ## 0.2.30
 
 - Require exact point-level citation hits before fallback reference jumps.
