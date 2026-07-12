@@ -4,36 +4,35 @@ Reference Guard is a Zotero 9 reader plugin for more reliable reference-jump hig
 
 The project was implemented by OpenAI Codex.
 
-It keeps Zotero's native PDF navigation behavior and adds a small guard layer around citation clicks:
+Version 0.3 uses the same core interaction architecture as Google Scholar PDF Reader, adapted to Zotero's existing PDF.js renderer:
 
-- suppresses formula-like numeric false positives such as isolated `1`, `(3)`, or `1/N`;
-- recognizes numeric and author-year citations, including suffixes such as `2024b`;
-- resolves individual numbers inside grouped citations such as `[6, 15]`;
-- flashes the matched bibliography entry after a jump;
-- uses reference-like PDF destinations as exact landing anchors when available;
-- bounds the flash to the current reference entry, including common two-column and cross-page layouts.
+- indexes native PDF annotation bounds and destinations before the user clicks;
+- maps the pointer directly to one annotation rectangle without parsing nearby citation text;
+- navigates with the annotation's exact named destination, page, and PDF coordinates;
+- highlights only the nearest target text item in the same PDF viewport geometry;
+- leaves PDFs without internal links to Zotero instead of guessing a plausible reference.
 
 ## Status
 
-This plugin is experimental and optimized from real Zotero Reader failures observed in academic PDFs. It does not replace Zotero's parser. It tries to recover when Zotero jumps without a visible destination highlight or when the clicked citation text is split across PDF text-layer spans.
+Version 0.3.0 is the first usable formal release. It is optimized from real Zotero Reader failures observed in academic PDFs and does not replace Zotero's parser or add OCR.
 
 Tested with Zotero 9.
 
 ## How It Works
 
-1. Capture citation clicks inside Zotero's PDF.js reader while preserving native navigation.
-2. Resolve exact citation subranges, PDF annotations, and named destinations before using text fallback matching.
-3. Read and cache PDF text geometry, then match one unambiguous bibliography entry on the native target page when possible.
-4. Convert PDF coordinates through the active viewport and draw temporary, non-interactive highlight overlays.
+1. Read each rendered page's PDF.js link annotations and cache `{bounds, destination}` records.
+2. Capture pointer input before Zotero's native link action and hit-test the page-local point against those bounds.
+3. Resolve the selected destination to an exact page and PDF coordinate, then navigate through Zotero's reader API.
+4. Convert the destination and target text through the active viewport and draw a temporary highlight over the nearest text item.
 
-Native PDF destinations are treated as stronger evidence than fuzzy text matches. Ambiguous citation groups, duplicate references, backward navigation without an explicit reference destination, and non-reference destinations are not guessed.
+This is an independent Zotero implementation informed by Google Scholar PDF Reader 0.5.2's pre-indexed internal-annotation flow. No Google extension code is bundled in this project.
 
 ## Scope and Limitations
 
 - Highlights are temporary visual overlays, not Zotero annotations.
-- Text matching requires a usable PDF text layer; scanned PDFs without OCR rely on native PDF destinations.
-- The plugin intentionally rejects ambiguous matches instead of jumping to the first plausible entry.
-- Reference formats outside numeric and common author-year styles may fall back to Zotero's native behavior.
+- Exact jumping requires a native internal PDF link annotation.
+- Visible highlighting additionally requires a usable target text layer and a destination with a vertical coordinate.
+- Scanned, flattened, or malformed PDFs without internal links keep Zotero's native behavior; Reference Guard does not infer a destination from citation text.
 
 ## Install
 
@@ -61,7 +60,7 @@ The package contains only `manifest.json`, `bootstrap.js`, `src/ref-guard.js`, a
 
 ## Development
 
-Run the heuristic tests:
+Run the annotation-mapping tests:
 
 ```powershell
 node .\tests\ref-guard-heuristics.test.js

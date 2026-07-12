@@ -1,8 +1,8 @@
 {
   "name": "reference-guard",
-  "version": "0.2.48",
+  "version": "0.3.0",
   "private": true,
-  "description": "A Zotero 9 reader plugin that improves reference-jump highlighting and reduces false citation hits.",
+  "description": "A Zotero 9 reader plugin that maps native PDF links to exact destinations and highlights the target.",
   "author": "OpenAI Codex",
   "license": "MIT",
   "scripts": {

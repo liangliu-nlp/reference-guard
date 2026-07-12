@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- First usable formal release of Reference Guard.
+- Replace post-click citation guessing with Google Scholar PDF Reader's annotation-overlay architecture.
+- Build exact click maps from native PDF annotation bounds and destinations before interaction.
+- Navigate with the resolved PDF page and coordinates, then highlight the nearest target text item in the same viewport coordinate system.
+- Remove heuristic jumping for PDFs without internal link annotations; unreliable guessing is no longer part of the primary path.
+
 ## 0.2.48
 
 - Remove personal-name attribution from public documentation and package metadata.
