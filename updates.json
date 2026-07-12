@@ -3,9 +3,9 @@
     "reference-guard@liangliu-nlp.github.io": {
       "updates": [
         {
-          "version": "0.2.41",
-          "update_link": "https://github.com/liangliu-nlp/reference-guard/releases/download/v0.2.41/reference-guard.xpi",
-          "update_hash": "sha256:7e38b66da77bc1db98a439a6160243252c990b823c3e519456a6156885cbf877",
+          "version": "0.3.1",
+          "update_link": "https://github.com/liangliu-nlp/reference-guard/releases/download/v0.3.1/reference-guard.xpi",
+          "update_hash": "sha256:657b1977d3a20e782feb35bbfd001470e099f7b71f88897f9941d8db71d3c3d9",
           "applications": {
             "zotero": {
               "strict_min_version": "9.0",
