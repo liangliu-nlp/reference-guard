@@ -130,6 +130,15 @@ assert.deepStrictEqual(
   "extracts point-level numeric citation groups"
 );
 
+assert.deepStrictEqual(
+  h.citationCandidates("limited by sparse supervision [6, 15].")[0].parts.map((part) => ({
+    text: part.text,
+    number: part.ref.number
+  })),
+  [{ text: "6", number: "6" }, { text: "15", number: "15" }],
+  "keeps independent click ranges for each numeric citation"
+);
+
 let exactClickRefs = [{ type: "author-year", author: "Guo", year: "2025", label: "Guo et al., 2025" }];
 
 assert.deepStrictEqual(
@@ -163,6 +172,69 @@ assert.strictEqual(
 );
 
 assert.strictEqual(
+  hooks.shouldUseLandingFallback("cite.Kamoi2024WhenCL"),
+  true,
+  "allows landing fallback for explicit citation destinations"
+);
+
+assert.strictEqual(
+  hooks.shouldUseLandingFallback("bib.bib10"),
+  true,
+  "allows landing fallback for bibliography destinations"
+);
+
+assert.strictEqual(
+  hooks.shouldUseLandingFallback(null),
+  false,
+  "does not guess landing highlights without a destination"
+);
+
+assert.strictEqual(
+  hooks.shouldUseLandingFallback("figure.1"),
+  false,
+  "does not guess landing highlights for non-reference destinations"
+);
+
+assert.deepStrictEqual(
+  hooks.destinationPoint([{}, { name: "XYZ" }, 72, 640, null]),
+  { x: 72, y: 640 },
+  "extracts an exact PDF anchor from XYZ destinations"
+);
+
+assert.deepStrictEqual(
+  hooks.destinationPoint([{}, { name: "FitH" }, 700]),
+  { x: null, y: 700 },
+  "extracts the vertical anchor from FitH destinations"
+);
+
+assert.strictEqual(
+  hooks.nativeDestinationContradictsRef(
+    "cite.hendrycks2021math",
+    { type: "author-year", author: "Yu", year: "2024", label: "Yu et al., 2024)" }
+  ),
+  true,
+  "detects a native destination that contradicts a fuzzy author-year hit"
+);
+
+assert.strictEqual(
+  hooks.nativeDestinationContradictsRef(
+    "cite.yu2025dapoopensourcellmreinforcement",
+    { type: "author-year", author: "Yu", year: "2025", label: "Yu et al., 2025" }
+  ),
+  false,
+  "keeps matching author-year native destinations"
+);
+
+assert.strictEqual(
+  hooks.nativeDestinationContradictsRef(
+    "bib.bib10",
+    { type: "author-year", author: "Yu", year: "2024", label: "Yu et al., 2024)" }
+  ),
+  false,
+  "does not reject opaque bibliography destinations without a conflicting year"
+);
+
+assert.strictEqual(
   hooks.visibleLinesLookLikeReferences([
     { text: "lizing a large teacher model's thoughts to supervise and correct both the reasoning and reflection processes." },
     { text: "As depicted in Figure 1, in the first stage we design a cross-model teacher-student workflow." },
@@ -193,6 +265,167 @@ assert.strictEqual(
   "recognizes dense author-list reference pages without a visible heading"
 );
 
+let fuzzyUniqueHit = hooks.nearestUnambiguousHit([
+  {
+    distance: 9,
+    candidate: { text: "[29]", refs: [{ type: "number", number: "29", label: "[29]" }] }
+  }
+]);
+
+assert.deepStrictEqual(
+  fuzzyUniqueHit.candidate.refs,
+  [{ type: "number", number: "29", label: "[29]" }],
+  "accepts one nearby fuzzy citation candidate"
+);
+
+assert.strictEqual(
+  hooks.nearestUnambiguousHit([
+    { distance: 8, candidate: { text: "[20]" } },
+    { distance: 14, candidate: { text: "[44]" } }
+  ]),
+  null,
+  "keeps ambiguous nearby citation candidates rejected"
+);
+
+assert.deepStrictEqual(
+  hooks.passiveCandidateReferences("commonsense reasoning [47], mathematical reasoning [23], code generation [7], CoT [61].").map((ref) => ref.number),
+  ["47", "23", "7", "61"],
+  "keeps all numeric page-level citation hints instead of only the first one"
+);
+
+let onlyPassiveRef = [{ type: "author-year", author: "Liu", year: "2025", label: "Liu et al., 2025" }];
+
+assert.deepStrictEqual(
+  hooks.pageChangeHighlightReferences(onlyPassiveRef),
+  onlyPassiveRef,
+  "allows passive page-change highlighting for one unique nearby citation"
+);
+
+assert.deepStrictEqual(
+  hooks.pageChangeHighlightReferences([
+    { type: "author-year", author: "Liu", year: "2025", label: "Liu et al., 2025" },
+    { type: "author-year", author: "Zhou", year: "2025", label: "Zhou et al., 2025" }
+  ]),
+  [],
+  "blocks passive page-change highlighting when nearby citation hints are ambiguous"
+);
+
+function visibleLine(text, top, left = 56, right = 1000) {
+  return { text, rect: { top, bottom: top + 14, left, right, width: right - left, height: 14 } };
+}
+
+let landingGroup = hooks.visibleReferenceEntryGroup([
+  visibleLine("[59] Alex Wang, Kyunghyun Cho, and Mike Lewis. Asking and answering questions.", 430),
+  visibleLine("factual consistency of summaries. arXiv preprint arXiv:2004.04228, 2020.", 456, 66),
+  visibleLine("[60] Yifei Wang, Yuyang Wu, Zeming Wei, Stefanie Jegelka, and Yisen Wang.", 510),
+  visibleLine("understanding of self-correction through in-context alignment.", 536, 66),
+  visibleLine("[61] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le,", 620),
+  visibleLine("Denny Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models.", 646, 66),
+  visibleLine("Advances in neural information processing systems, 35:24824-24837, 2022.", 672, 66),
+  visibleLine("[62] Lai Wei, Yuting Li, Chen Wang, Yue Wang, Linghe Kong, Weiran Huang, and Lichao Sun.", 738)
+], 626);
+
+assert.deepStrictEqual(
+  landingGroup.map((line) => line.text),
+  [
+    "[61] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le,",
+    "Denny Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models.",
+    "Advances in neural information processing systems, 35:24824-24837, 2022."
+  ],
+  "landing fallback picks the visible reference entry nearest the jump landing band"
+);
+
+let splitLabelLandingGroup = hooks.visibleReferenceEntryGroup([
+  visibleLine("[60]", 510, 56, 94),
+  visibleLine("Yifei Wang, Yuyang Wu, Zeming Wei, Stefanie Jegelka, and Yisen Wang.", 510, 106),
+  visibleLine("understanding of self-correction through in-context alignment.", 536, 106),
+  visibleLine("[61]", 620, 56, 94),
+  visibleLine("Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le,", 620, 106),
+  visibleLine("Denny Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models.", 646, 106),
+  visibleLine("Advances in neural information processing systems, 35:24824-24837, 2022.", 672, 106),
+  visibleLine("[62]", 738, 56, 94),
+  visibleLine("Lai Wei, Yuting Li, Chen Wang, Yue Wang, Linghe Kong, Weiran Huang, and Lichao Sun.", 738, 106)
+], 626);
+
+assert.deepStrictEqual(
+  splitLabelLandingGroup.map((line) => line.text),
+  [
+    "[61]",
+    "Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, Fei Xia, Ed Chi, Quoc V Le,",
+    "Denny Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models.",
+    "Advances in neural information processing systems, 35:24824-24837, 2022."
+  ],
+  "landing fallback keeps split numeric labels attached to their reference entry"
+);
+
+function fakeVisibleWin(lines) {
+  let page = {};
+  let spans = lines.map((line) => ({
+    textContent: line.text,
+    parentElement: page,
+    getBoundingClientRect() {
+      return line.rect;
+    }
+  }));
+  return {
+    innerHeight: 900,
+    innerWidth: 1200,
+    document: {
+      querySelectorAll() {
+        return spans;
+      }
+    }
+  };
+}
+
+let visibleBoundedGroup = hooks.visibleReferenceGroup(fakeVisibleWin([
+  visibleLine("[61] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma.", 620),
+  visibleLine("Chain-of-thought prompting elicits reasoning in large language models.", 646, 66),
+  visibleLine("[62] Lai Wei, Yuting Li, Chen Wang, Yue Wang.", 738)
+]), { type: "number", number: "61", label: "[61]" });
+
+assert.deepStrictEqual(
+  visibleBoundedGroup.map((line) => line.text),
+  [
+    "[61] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma.",
+    "Chain-of-thought prompting elicits reasoning in large language models."
+  ],
+  "visible exact-reference highlighting stops at the next reference entry"
+);
+
+let visibleSplitLabelGroup = hooks.visibleReferenceGroup(fakeVisibleWin([
+  visibleLine("[61]", 620, 56, 94),
+  visibleLine("Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma.", 620, 106),
+  visibleLine("Chain-of-thought prompting elicits reasoning in large language models.", 646, 106),
+  visibleLine("[62]", 738, 56, 94),
+  visibleLine("Lai Wei, Yuting Li, Chen Wang, Yue Wang.", 738, 106)
+]), { type: "number", number: "61", label: "[61]" });
+
+assert.deepStrictEqual(
+  visibleSplitLabelGroup.map((line) => line.text),
+  [
+    "[61]",
+    "Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma.",
+    "Chain-of-thought prompting elicits reasoning in large language models."
+  ],
+  "visible exact-reference highlighting keeps split numeric labels attached"
+);
+
+let visibleApaGroup = hooks.visibleReferenceGroup(fakeVisibleWin([
+  visibleLine("Smith, J. (2020). A precise first line", 510),
+  visibleLine("with a title that continues after the year.", 536, 66),
+  visibleLine("Taylor, R. (2021). The next reference.", 572)
+]), { type: "author-year", author: "Smith", year: "2020", label: "Smith, 2020" });
+
+assert.deepStrictEqual(
+  visibleApaGroup.map((line) => line.text),
+  [
+    "Smith, J. (2020). A precise first line",
+    "with a title that continues after the year."
+  ],
+  "keeps visible APA continuation lines after an early year"
+);
+
 function pdfLine(str, x, y) {
   return {
     str,
@@ -201,6 +434,108 @@ function pdfLine(str, x, y) {
     height: 9
   };
 }
+
+let oneLineNumericMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 9,
+    text: "References [1] A. First title, 2020. [2] B. Second title, 2021.",
+    items: [
+      pdfLine("References", 50, 720),
+      pdfLine("[1] A. First title, 2020.", 50, 680),
+      pdfLine("[2] B. Second title, 2021.", 50, 660)
+    ]
+  }
+], { type: "number", number: "1", label: "[1]" });
+
+assert.deepStrictEqual(
+  oneLineNumericMatch.lines.map((line) => line.text),
+  ["[1] A. First title, 2020."],
+  "stops a one-line numeric reference before the next entry"
+);
+
+let inlineNumericMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 9,
+    text: "References [99] A title mentioning [1] internally. [1] Actual target.",
+    items: [
+      pdfLine("References", 50, 720),
+      pdfLine("[99] A title mentioning [1] internally.", 50, 680),
+      pdfLine("[1] Actual target.", 50, 660)
+    ]
+  }
+], { type: "number", number: "1", label: "[1]" });
+
+assert.deepStrictEqual(
+  inlineNumericMatch.lines.map((line) => line.text),
+  ["[1] Actual target."],
+  "does not match a numeric citation embedded inside another reference"
+);
+
+let splitPdfLabelMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 9,
+    text: "References [61] Jason Wei. Chain of thought, 2022. [62] Lai Wei.",
+    items: [
+      pdfLine("References", 50, 720),
+      pdfLine("[61]", 56, 680),
+      pdfLine("Jason Wei. Chain of thought,", 106, 680),
+      pdfLine("Advances in NLP, 2022.", 106, 660),
+      pdfLine("[62]", 56, 640),
+      pdfLine("Lai Wei. The next reference.", 106, 640)
+    ]
+  }
+], { type: "number", number: "61", label: "[61]" });
+
+assert.deepStrictEqual(
+  splitPdfLabelMatch.lines.map((line) => line.text),
+  ["[61]", "Jason Wei. Chain of thought,", "Advances in NLP, 2022."],
+  "keeps a split PDF numeric label attached to its entry"
+);
+
+assert.strictEqual(
+  hooks.findReferenceMatch([
+    {
+      pageNumber: 9,
+      text: "References John Smith. First work, 2020. Jane Smith. Second work, 2020.",
+      items: [
+        pdfLine("References", 50, 720),
+        pdfLine("John Smith. First work, 2020.", 50, 680),
+        pdfLine("Jane Smith. Second work, 2020.", 50, 660)
+      ]
+    }
+  ], { type: "author-year", author: "Smith", year: "2020", label: "Smith, 2020" }),
+  null,
+  "rejects ambiguous same-author same-year references"
+);
+
+let resetNumberPages = [
+  {
+    pageNumber: 9,
+    text: "References [1] Chapter one reference.",
+    items: [pdfLine("References", 50, 720), pdfLine("[1] Chapter one reference.", 50, 680)]
+  },
+  {
+    pageNumber: 19,
+    text: "References [1] Chapter two reference.",
+    items: [pdfLine("References", 50, 720), pdfLine("[1] Chapter two reference.", 50, 680)]
+  }
+];
+
+assert.strictEqual(
+  hooks.findReferenceMatch(resetNumberPages, { type: "number", number: "1", label: "[1]" }),
+  null,
+  "rejects reset numeric references without a native target page"
+);
+
+assert.deepStrictEqual(
+  hooks.findReferenceMatch(
+    resetNumberPages,
+    { type: "number", number: "1", label: "[1]" },
+    { expectedPage: 19 }
+  ).lines.map((line) => line.text),
+  ["[1] Chapter two reference."],
+  "uses the native target page to disambiguate reset numeric references"
+);
 
 let crossPageMatch = hooks.findReferenceMatch([
   {
@@ -233,6 +568,29 @@ assert.deepStrictEqual(
     "preprint arXiv:2602.02416, 2026."
   ],
   "does not include the next reference after the cross-page continuation"
+);
+
+let crossPageNewEntryMatch = hooks.findReferenceMatch([
+  {
+    pageNumber: 12,
+    text: "Ankur Samanta, Akshayaa Magesh, Kaveh",
+    items: [
+      pdfLine("Ankur Samanta, Akshayaa Magesh, Kaveh", 70, 20)
+    ]
+  },
+  {
+    pageNumber: 13,
+    text: "John Schulman. Trust region policy optimization, 2026.",
+    items: [
+      pdfLine("John Schulman. Trust region policy optimization, 2026.", 70, 710)
+    ]
+  }
+], { type: "author-year", author: "Samanta", year: "2026", label: "Samanta et al. (2026)" });
+
+assert.strictEqual(
+  crossPageNewEntryMatch,
+  null,
+  "does not complete a bottom-of-page reference with the next page's new entry"
 );
 
 let boundedAuthorYearMatch = hooks.findReferenceMatch([

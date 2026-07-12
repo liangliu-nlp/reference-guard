@@ -1,10 +1,12 @@
 (function () {
-  const CODE_VERSION = "0.2.41";
+  const CODE_VERSION = "0.2.48";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const OVERLAY_CLASS = "ref-guard-overlay";
   const EVENT_TYPES = ["click"];
   const LINK_SELECTOR = ".linkAnnotation, .annotationLayer a[href], a[href]";
+  const FUZZY_CITATION_X_PAD = 30;
+  const FUZZY_CITATION_Y_PAD = 12;
   const NOISY_DIAGNOSTICS = /^(?:scanFrameTree|scanFrame\.skip|addToFrame\.skip|addToWindow\.skip)$/;
 
   function clip(value, length = 180) {
@@ -158,7 +160,7 @@
       let numericSource = `${cleanText} ${cleanContext}`;
       for (let match of numericSource.matchAll(/[\[(]\s*(\d{1,3})(?:\s*(?:,|;|-|--|\u2013|\u2014)\s*\d{1,3})*\s*[\])]/g)) {
         let numbers = match[0].match(/\d{1,3}/g) || [];
-        for (let value of numbers.slice(0, 3)) {
+        for (let value of numbers) {
           let key = `n:${value}`;
           if (!seen.has(key)) {
             refs.push({ type: "number", number: value, label: match[0] });
@@ -186,12 +188,14 @@
       if (!text) return [];
 
       let candidates = [];
-      let add = (start, end, label) => {
+      let add = (start, end, label, parts = null) => {
         label = this.cleanText(label);
         if (!label) return;
         let refs = this.parseReferenceTriggers(label, "");
         if (!refs.length) return;
-        candidates.push({ start, end, text: label, refs });
+        let candidate = { start, end, text: label, refs };
+        if (parts?.length) candidate.parts = parts;
+        candidates.push(candidate);
       };
 
       let authorYearPatterns = [
@@ -209,7 +213,14 @@
       let numericPattern = /[\[(]\s*(\d{1,3})(?:\s*(?:,|;|-|--|\u2013|\u2014)\s*\d{1,3})*\s*[\])]/g;
       let numeric;
       while ((numeric = numericPattern.exec(text))) {
-        add(numeric.index, numeric.index + numeric[0].length, numeric[0]);
+        let refs = this.parseReferenceTriggers(numeric[0], "");
+        let parts = Array.from(numeric[0].matchAll(/\d{1,3}/g)).map((match) => ({
+          start: numeric.index + match.index,
+          end: numeric.index + match.index + match[0].length,
+          text: match[0],
+          ref: refs.find((ref) => ref.type === "number" && ref.number === match[0])
+        })).filter((part) => part.ref);
+        add(numeric.index, numeric.index + numeric[0].length, numeric[0], parts);
       }
 
       candidates.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -276,7 +287,7 @@
       };
     }
 
-    return lines.filter((line) => Heuristics.cleanText(line.text).length > 3);
+    return lines.filter((line) => Heuristics.cleanText(line.text).length > 3 || /^\[\s*\d{1,3}\s*\]$/.test(line.text));
   }
 
   function visibleTextLines(win) {
@@ -316,6 +327,21 @@
       && x <= rect.right + xPad
       && y >= rect.top - yPad
       && y <= rect.bottom + yPad;
+  }
+
+  function distanceToRect(x, y, rect) {
+    if (!rect) return Infinity;
+    let dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0;
+    let dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+    return Math.hypot(dx, dy);
+  }
+
+  function nearestUnambiguousHit(hits) {
+    hits = hits.slice().sort((a, b) => a.distance - b.distance);
+    if (!hits.length) return null;
+    // ponytail: ambiguous nearby citations stay rejected; exact clicks still work above.
+    if (hits.length > 1 && hits[1].distance - hits[0].distance < 12) return null;
+    return hits[0];
   }
 
   function lineWithSegments(line) {
@@ -424,24 +450,38 @@
 
     let candidateCount = 0;
     let context = nearby.map((line) => line.text).join(" ");
+    let exactHits = [];
+    let fuzzyHits = [];
     for (let line of nearby) {
       let built = lineWithSegments(line);
       for (let candidate of Heuristics.citationCandidates(built.text)) {
-        let rects = candidateRects(built.segments, candidate);
-        let rect = unionRects(rects);
-        if (!rect) continue;
-        candidateCount++;
-        if (pointInRect(x, y, rect)) {
-          return {
-            text: candidate.text,
-            context: built.text,
-            refs: candidate.refs,
-            rects,
-            rejected: false,
-            candidates: candidateCount
-          };
+        let hits = candidate.parts?.length
+          ? candidate.parts.map((part) => ({ text: part.text, refs: [part.ref], start: part.start, end: part.end }))
+          : [candidate];
+        for (let hit of hits) {
+          let rects = candidateRects(built.segments, hit);
+          let rect = unionRects(rects);
+          if (!rect) continue;
+          candidateCount++;
+          let entry = { candidate: hit, rects, rect, context: built.text, distance: distanceToRect(x, y, rect) };
+          if (pointInRect(x, y, rect)) exactHits.push(entry);
+          else if (pointInRect(x, y, rect, FUZZY_CITATION_X_PAD, FUZZY_CITATION_Y_PAD)) fuzzyHits.push(entry);
         }
       }
+    }
+
+    let hit = exactHits.length === 1 ? exactHits[0] : exactHits.length ? null : nearestUnambiguousHit(fuzzyHits);
+    if (hit) {
+      return {
+        text: hit.candidate.text,
+        context: hit.context,
+        refs: hit.candidate.refs,
+        rects: hit.rects,
+        rejected: false,
+        fuzzy: !exactHits.length,
+        distance: Math.round(hit.distance),
+        candidates: candidateCount
+      };
     }
 
     return candidateCount ? { text: "", context, refs: [], rejected: true, candidates: candidateCount } : null;
@@ -608,6 +648,7 @@
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
       }) || win.document.querySelector(`.page[data-page-number="${currentPageNumber(win)}"]`);
     }
+    if (!pageDiv) return null;
     let pageRect = pageDiv.getBoundingClientRect();
     let pageNumber = Number(pageDiv?.dataset?.pageNumber) || currentPageNumber(win);
     if (!pageNumber) return null;
@@ -751,20 +792,101 @@
     }
 
     if (!pageNumber) return null;
-    return { pageNumber, destArray: explicitDest };
+    return { pageNumber, destArray: explicitDest, point: destinationPoint(explicitDest) };
   }
 
-  function schedulePageChangeHighlight(win, frameState, clickId, beforePage, refs = []) {
+  function destinationPoint(destArray) {
+    let mode = unwrap(destArray?.[1]);
+    mode = typeof mode === "string" ? mode : mode?.name || "";
+    let number = (value) => value == null ? null : Number(value);
+    let x = null;
+    let y = null;
+    if (mode === "XYZ") {
+      x = number(destArray[2]);
+      y = number(destArray[3]);
+    }
+    else if (mode === "FitH" || mode === "FitBH") {
+      y = number(destArray[2]);
+    }
+    else if (mode === "FitV" || mode === "FitBV") {
+      x = number(destArray[2]);
+    }
+    else if (mode === "FitR") {
+      x = Math.min(number(destArray[2]), number(destArray[4]));
+      y = Math.max(number(destArray[3]), number(destArray[5]));
+    }
+    return {
+      x: Number.isFinite(x) ? x : null,
+      y: Number.isFinite(y) ? y : null
+    };
+  }
+
+  function destinationScreenY(win, resolved) {
+    if (!resolved?.point || resolved.point.y == null) return null;
+    let app = unwrap(getPDFApplication(win));
+    let pdfViewer = unwrap(app?.pdfViewer);
+    let pageView = unwrap(pdfViewer?.getPageView?.(resolved.pageNumber - 1));
+    let viewport = unwrap(pageView?.viewport);
+    let pageDiv = pageView?.div || win.document.querySelector(`.page[data-page-number="${resolved.pageNumber}"]`);
+    if (!viewport?.convertToViewportPoint || !pageDiv) return null;
+    let point = viewport.convertToViewportPoint(resolved.point.x || 0, resolved.point.y);
+    return pageDiv.getBoundingClientRect().top + point[1];
+  }
+
+  function isLikelyReferenceDestination(dest) {
+    let name = destinationName(dest).toLowerCase();
+    return /(?:^|[.#/_-])(?:cite|citation|bib|bibr|ref|references?)(?:[.#/_-]|\d|$)/.test(name);
+  }
+
+  function shouldUseLandingFallback(dest) {
+    return isLikelyReferenceDestination(dest) && !isClearlyNonReferenceDestination(dest);
+  }
+
+  function schedulePageChangeHighlight(win, frameState, clickId, beforePage, refs = [], { landingDest = null } = {}) {
     if (!beforePage) return;
     let flashed = false;
+    let allowLandingFallback = shouldUseLandingFallback(landingDest);
+    let landingResolved = allowLandingFallback ? resolveDestination(win, landingDest).catch(() => null) : Promise.resolve(null);
+    let highlightRefs = pageChangeHighlightReferences(refs);
     let delays = [120, 300, 700, 1200, 2000, 3000];
     for (let delay of delays) {
-      win.setTimeout(() => {
+      win.setTimeout(async () => {
         if (frameState.clickId !== clickId || flashed) return;
         let page = currentPageNumber(win);
-        if (page && page > beforePage && refs.length && flashVisibleReference(win, refs)) {
+        if (page && page > beforePage && highlightRefs.length && flashVisibleReference(win, highlightRefs)) {
           flashed = true;
           diag("pageChangeHighlight", { from: beforePage, to: page, refs: refs.length });
+        }
+        else if (allowLandingFallback) {
+          let resolved = await landingResolved;
+          if (frameState.clickId !== clickId || flashed) return;
+          let reachedDestination = resolved?.pageNumber === page || (!resolved && page && page > beforePage);
+          if (!reachedDestination || !flashLandingReference(win, resolved)) {
+            if (delay === delays[delays.length - 1]) {
+              diag("pageChangeHighlightMiss", {
+                from: beforePage,
+                to: page,
+                refs: refs.length,
+                reason: reachedDestination ? "no-visible-reference" : "destination-not-reached"
+              });
+            }
+            return;
+          }
+          flashed = true;
+          diag("pageChangeLandingFallback", {
+            from: beforePage,
+            to: page,
+            refs: refs.length,
+            dest: typeof landingDest === "string" ? landingDest : !!landingDest
+          });
+        }
+        else if (delay === delays[delays.length - 1] && refs.length) {
+          diag("pageChangeHighlightMiss", {
+            from: beforePage,
+            to: page,
+            refs: refs.length,
+            reason: !page ? "no-current-page" : page <= beforePage ? "no-forward-page-change" : !highlightRefs.length ? "ambiguous-passive-refs" : allowLandingFallback ? "no-visible-reference" : "no-reference-destination"
+          });
         }
       }, delay);
     }
@@ -821,21 +943,71 @@
       if (!matchesLine(lines[i])) continue;
       let base = lines[i];
       let group = [base];
+      let columnBase = base;
       let text = base.text;
-      for (let j = i + 1; j < lines.length && group.length < 6; j++) {
-        if (!sameColumn(base, lines[j])) continue;
+      let maxLines = ref.type === "author-year" ? 10 : 6;
+      for (let j = i + 1; j < lines.length && group.length < maxLines; j++) {
+        let splitLabelCompanion = /^\[\s*\d{1,3}\s*\]$/.test(base.text)
+          && group.length === 1
+          && Math.abs(lines[j].rect.top - base.rect.top) < 8;
+        if (!splitLabelCompanion && looksLikeNumberedReferenceStart(lines[j].text) && lines[j].rect.left <= base.rect.left + 7) break;
+        if (!splitLabelCompanion && !sameColumn(columnBase, lines[j])) continue;
+        if (!splitLabelCompanion && lines[j].rect.left <= columnBase.rect.left + 7 && looksLikeVisibleReferenceStart(lines[j])) break;
         group.push(lines[j]);
+        if (splitLabelCompanion) columnBase = lines[j];
         text += " " + lines[j].text;
-        if (ref.year && text.includes(ref.year)) break;
       }
       if (!ref.year || text.includes(ref.year)) return group;
     }
     return null;
   }
 
+  function visibleReferenceEntryGroup(lines, targetY) {
+    let numberedStarts = [];
+    let authorStarts = [];
+    for (let i = 0; i < lines.length; i++) {
+      if (looksLikeNumberedReferenceStart(lines[i].text) || /^\[\s*\d{1,3}\s*\]$/.test(lines[i].text)) numberedStarts.push(i);
+      else if (looksLikeVisibleAuthorReferenceStart(lines[i])) authorStarts.push(i);
+    }
+    let numberedMode = !!numberedStarts.length;
+    let starts = numberedMode ? numberedStarts : authorStarts;
+    if (!starts.length) return null;
+
+    let index = starts.reduce((best, current) => {
+      let bestCenter = (lines[best].rect.top + lines[best].rect.bottom) / 2;
+      let currentCenter = (lines[current].rect.top + lines[current].rect.bottom) / 2;
+      return Math.abs(currentCenter - targetY) < Math.abs(bestCenter - targetY) ? current : best;
+    }, starts[0]);
+
+    let base = lines[index];
+    let group = [base];
+    let columnBase = base;
+    for (let i = index + 1; i < lines.length && group.length < 6; i++) {
+      let nextNumbered = looksLikeNumberedReferenceStart(lines[i].text) || /^\[\s*\d{1,3}\s*\]$/.test(lines[i].text);
+      if (numberedMode && nextNumbered && group.length > 1) break;
+      if (/^\[\s*\d{1,3}\s*\]$/.test(base.text) && group.length === 1 && Math.abs(lines[i].rect.top - base.rect.top) < 8) {
+        group.push(lines[i]);
+        columnBase = lines[i];
+        continue;
+      }
+      if (numberedMode && nextNumbered && lines[i].rect.left <= base.rect.left + 7) break;
+      if (!sameColumn(columnBase, lines[i])) continue;
+      if (lines[i].rect.left <= columnBase.rect.left + 7) {
+        if (nextNumbered || (!numberedMode && looksLikeVisibleAuthorReferenceStart(lines[i]))) break;
+      }
+      group.push(lines[i]);
+    }
+    return group;
+  }
+
   function looksLikeVisibleReferenceStart(line) {
     return looksLikeNumberedReferenceStart(line.text)
-      || /^[A-Z][A-Za-z'\u2019.-]+(?:-[A-Z][A-Za-z'\u2019.-]+)?\s+(?:[A-Z](?:[A-Za-z'\u2019.-]+|\.)?|and\b)/.test(line.text);
+      || /^\[\s*\d{1,3}\s*\]$/.test(line.text)
+      || looksLikeVisibleAuthorReferenceStart(line);
+  }
+
+  function looksLikeVisibleAuthorReferenceStart(line) {
+    return /^[A-Z][A-Za-z'\u2019.-]+(?:-[A-Z][A-Za-z'\u2019.-]+)?,?\s+(?:[A-Z](?:[A-Za-z'\u2019.-]+|\.)?|and\b)/.test(line.text);
   }
 
   function visiblePageLooksLikeReferences(win) {
@@ -859,9 +1031,9 @@
           if (!group) continue;
           let baseRect = group[0].rect;
           let rects = group.map((line) => ({
-            left: Math.max(line.rect.left, baseRect.left - 8),
+            left: Math.min(baseRect.left, line.rect.left),
             top: line.rect.top,
-            right: Math.min(line.rect.right, baseRect.right + 24),
+            right: line.rect.right,
             bottom: line.rect.bottom
           })).filter((rect) => rect.right - rect.left > 2);
           flashRects(win, rects, 4200);
@@ -880,8 +1052,36 @@
       : [];
   }
 
+  function referenceKey(ref) {
+    return ref.type === "number"
+      ? `n:${ref.number}`
+      : `ay:${String(ref.author || "").toLowerCase()}-${ref.year || ""}${ref.suffix || ""}`;
+  }
+
+  function uniqueReferences(refs, limit) {
+    let seen = new Set();
+    let out = [];
+    for (let ref of refs || []) {
+      let key = referenceKey(ref);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(ref);
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  function pageChangeHighlightReferences(refs) {
+    let unique = uniqueReferences(refs, 2);
+    return unique.length === 1 ? unique : [];
+  }
+
   function passiveReferences(context, limit = 8) {
-    return Heuristics.parseReferenceTriggers("", context).slice(0, limit);
+    return uniqueReferences(Heuristics.parseReferenceTriggers("", context), limit);
+  }
+
+  function passiveCandidateReferences(context, limit = 40) {
+    return uniqueReferences(Heuristics.citationCandidates(context).flatMap((candidate) => candidate.refs), limit);
   }
 
   function passiveReferencesNearPoint(win, x, y) {
@@ -894,8 +1094,10 @@
       )).slice(0, 3);
     }
     let context = lines.map((line) => line.text).join(" ");
-    let refs = passiveReferences(context);
+    let refs = passiveCandidateReferences(context, 8);
+    if (!refs.length) refs = passiveReferences(context);
     if (refs.length) diag("passiveRefs", { refs: refs.length, context: clip(context) });
+    else diag("passiveRefs.miss", { lines: lines.length, context: clip(context) });
     return refs;
   }
 
@@ -968,12 +1170,10 @@
     }
 
     let context = nearby.map((entry) => entry.line.text).join(" ");
-    let refs = passiveReferences(context);
+    let refs = passiveCandidateReferences(context, 8);
+    if (!refs.length) refs = passiveReferences(context);
     if (refs.length) diag("passivePdfRefs", { refs: refs.length, context: clip(context) });
-    else {
-      refs = passiveReferences(page.text, 40);
-      diag("passivePdfRefs.miss", { reason: "line-no-refs", lines: nearby.length, pageRefs: refs.length, context: clip(context) });
-    }
+    else diag("passivePdfRefs.miss", { reason: "line-no-refs", lines: nearby.length, context: clip(context) });
     return refs;
   }
 
@@ -999,6 +1199,24 @@
     return false;
   }
 
+  function flashLandingReference(win, resolved = null) {
+    let lines = visibleTextLines(win);
+    if (!visibleLinesLookLikeReferences(lines)) return false;
+    let anchoredY = destinationScreenY(win, resolved);
+    let group = visibleReferenceEntryGroup(lines, anchoredY ?? win.innerHeight * 0.58);
+    if (!group) return false;
+    let baseRect = group[0].rect;
+    let rects = group.map((line) => ({
+      left: Math.min(baseRect.left, line.rect.left),
+      top: line.rect.top,
+      right: line.rect.right,
+      bottom: line.rect.bottom
+    })).filter((rect) => rect.right - rect.left > 2);
+    flashRects(win, rects, 4200);
+    diag("pageChangeLandingHighlight", { page: currentPageNumber(win), lines: group.length, anchored: anchoredY != null, text: clip(group[0].text) });
+    return true;
+  }
+
   function diagFallbackClick(click, refs, extra) {
     diag("fallback.click", Object.assign({
       page: click.beforePage,
@@ -1007,6 +1225,8 @@
       text: clip(click.text),
       context: clip(click.context),
       pointHit: !!click.citationHit?.refs?.length,
+      fuzzy: !!click.citationHit?.fuzzy,
+      distance: click.citationHit?.distance,
       refs
     }, extra || {}));
   }
@@ -1052,7 +1272,9 @@
   function referenceStartIndex(pages) {
     if (pages.referenceStartIndex != null) return pages.referenceStartIndex;
 
-    let explicit = pages.findIndex((page) => /\b(references|bibliography)\b/i.test(page.text));
+    let explicit = pages.findIndex((page) => itemLines(page).some((line) => (
+      /^(?:references|bibliography)(?:\s+and\s+notes)?\s*$/i.test(line.text)
+    )));
     if (explicit >= 0) {
       pages.referenceStartIndex = explicit;
       return explicit;
@@ -1060,9 +1282,10 @@
 
     let dense = pages.findIndex((page) => {
       if (page.pageNumber < 4) return false;
-      let hits = page.text.match(/\b[A-Z][A-Za-z'\u2019.-]+\s+(?:et\s+al\.,?\s+)?(?:19|20)\d{2}\b/g);
-      let numeric = page.text.match(/(?:^|\s)\[?\d{1,3}\]?\s+[A-Z][A-Za-z]/g);
-      return (hits && hits.length >= 6) || (numeric && numeric.length >= 8);
+      let lines = itemLines(page);
+      let authorStarts = lines.filter(looksLikeVisibleAuthorReferenceStart).length;
+      let numericStarts = lines.filter((line) => looksLikeNumberedReferenceStart(line.text)).length;
+      return authorStarts >= 6 || numericStarts >= 8;
     });
     pages.referenceStartIndex = dense >= 0 ? dense : Math.max(0, pages.length - 8);
     return pages.referenceStartIndex;
@@ -1116,7 +1339,7 @@
   }
 
   function numberedReferencePattern(number) {
-    return new RegExp("(?:^|\\s)(?:\\[\\s*" + escapeRegExp(number) + "\\s*\\]|" + escapeRegExp(number) + "\\s*[.)])\\s+");
+    return new RegExp("^\\s*(?:\\[\\s*" + escapeRegExp(number) + "\\s*\\]|" + escapeRegExp(number) + "\\s*[.)])(?:\\s+|$)");
   }
 
   function referenceLineMatcher(ref) {
@@ -1125,21 +1348,35 @@
       return (line) => pattern.test(line.text);
     }
     let author = new RegExp("\\b" + escapeRegExp(ref.author) + "\\b", "i");
-    return (line) => author.test(line.text);
+    return (line) => {
+      let startsEntry = Number.isFinite(line.left)
+        ? looksLikeNextReferenceStart(line, line)
+        : looksLikeVisibleReferenceStart(line);
+      return startsEntry && author.test(line.text.slice(0, 96));
+    };
   }
 
   function collectReferenceLines(lines, index, ref) {
     let base = lines[index];
     let group = [base];
-    let text = base.text;
+    let columnBase = base;
     let maxLines = ref.type === "author-year" ? 10 : 6;
     for (let i = index + 1; i < lines.length && group.length < maxLines; i++) {
       let line = lines[i];
-      if (Math.abs(line.y - base.y) < 3 && line.left > base.right + 24) continue;
-      if (!samePdfColumn(base, line)) continue;
-      if (group.length > 1 && looksLikeNextReferenceStart(base, line)) break;
+      let splitLabelCompanion = /^\[\s*\d{1,4}\s*\]$/.test(base.text)
+        && group.length === 1
+        && Math.abs(line.y - base.y) < 3
+        && line.left > base.right;
+      if (splitLabelCompanion) {
+        group.push(line);
+        columnBase = line;
+        continue;
+      }
+      if (looksLikeNumberedReferenceStart(line.text) && line.left <= base.left + 7) break;
+      if (Math.abs(line.y - columnBase.y) < 3 && line.left > columnBase.right + 24) continue;
+      if (!samePdfColumn(columnBase, line)) continue;
+      if (looksLikeNextReferenceStart(columnBase, line)) break;
       group.push(line);
-      text += " " + line.text;
     }
     return group;
   }
@@ -1148,11 +1385,11 @@
     if (line.left > base.left + 7) return false;
     if (/^\d{1,4}$/.test(line.text)) return false;
     return looksLikeNumberedReferenceStart(line.text)
-      || /^[A-Z][A-Za-z'\u2019.-]+(?:-[A-Z][A-Za-z'\u2019.-]+)?\s+(?:[A-Z](?:[A-Za-z'\u2019.-]+|\.)?|and\b)/.test(line.text);
+      || looksLikeVisibleAuthorReferenceStart(line);
   }
 
   function looksLikeNumberedReferenceStart(text) {
-    return /^(?:\[\s*\d{1,3}\s*\]|\d{1,3}[.)])\s+\S/.test(text);
+    return /^(?:\[\s*\d{1,4}\s*\]|\d{1,4}[.)])(?:\s+\S|$)/.test(text);
   }
 
   function referenceText(group) {
@@ -1180,6 +1417,7 @@
     let originalLength = group.length;
     for (let line of itemLines(nextPage)) {
       if (/^\d{1,4}$/.test(line.text)) continue;
+      if (group.length === originalLength && line.left <= base.left + 4 && looksLikeNextReferenceStart(base, line)) break;
       if (group.length > originalLength && line.left <= base.left + 4) break;
       if (group.length >= 10) break;
 
@@ -1198,12 +1436,14 @@
     return group;
   }
 
-  function findReferenceMatch(pages, ref) {
+  function findReferenceMatch(pages, ref, { expectedPage = null } = {}) {
     if (!pages.length) return null;
     let start = referenceStartIndex(pages);
     let matchesLine = referenceLineMatcher(ref);
+    let matches = [];
     for (let pageIndex = start; pageIndex < pages.length; pageIndex++) {
       let page = pages[pageIndex];
+      if (expectedPage && page.pageNumber !== expectedPage) continue;
       let lines = itemLines(page);
       for (let i = 0; i < lines.length; i++) {
         if (!matchesLine(lines[i])) continue;
@@ -1211,10 +1451,11 @@
         let text = referenceText(group);
         let expectedYear = expectedReferenceYear(ref);
         if (expectedYear && !text.includes(expectedYear)) continue;
-        return { page, lines: group };
+        matches.push({ page, lines: group });
+        if (matches.length > 1) return null;
       }
     }
-    return null;
+    return matches[0] || null;
   }
 
   async function navigateToPage(win, pageNumber, { history = false } = {}) {
@@ -1377,7 +1618,7 @@
     }
 
     for (let ref of refs) {
-      let match = findReferenceMatch(pages, ref);
+      let match = findReferenceMatch(pages, ref, { expectedPage: nativeChangedTo });
       if (!match) {
         diag("fallback.miss", { ref });
         continue;
@@ -1422,6 +1663,27 @@
     return /(?:^|[.#/_-])(?:fig(?:ure)?|table|tbl|equation|eq|section|sec|appendix|algorithm|alg)(?:[.#/_-]|\d|$)/.test(name);
   }
 
+  function normalizedDestinationName(dest) {
+    return destinationName(dest).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+
+  function nativeDestinationContradictsRef(dest, ref) {
+    if (ref?.type !== "author-year") return false;
+    let name = normalizedDestinationName(dest);
+    if (!name) return false;
+
+    let author = Heuristics.cleanText(ref.author).toLowerCase().replace(/[^a-z0-9]+/g, "");
+    let year = Heuristics.cleanText(ref.year);
+    if ((author && name.includes(author)) || (year && name.includes(year))) return false;
+
+    let years = name.match(/(?:19|20)\d{2}/g) || [];
+    return !!(year && years.length && !years.includes(year));
+  }
+
+  function nativeDestinationContradictsRefs(dest, refs) {
+    return (refs || []).some((ref) => nativeDestinationContradictsRef(dest, ref));
+  }
+
   async function resolveNonDomClick(win, frameState, click, logError) {
     if (click.citationHit?.rejected) {
       diag("fallback.pointReject", {
@@ -1441,7 +1703,17 @@
     }
 
     let refs = clickReferences(click.citationHit);
-    if (!refs.length) return;
+    if (!refs.length) {
+      diag("fallback.noRefs", {
+        page: click.beforePage,
+        x: Math.round(click.x),
+        y: Math.round(click.y),
+        rejected: !!click.citationHit?.rejected,
+        candidates: click.citationHit?.candidates || 0,
+        context: clip(click.context)
+      });
+      return;
+    }
 
     let nativeLink = null;
     try {
@@ -1460,6 +1732,17 @@
         direct: nativeLink.direct,
         source: nativeLink.source || "dom"
       });
+      if (nativeDestinationContradictsRefs(nativeLink.dest, refs)) {
+        diag("nativeLink.refMismatch", {
+          page: click.beforePage,
+          dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest,
+          refs,
+          text: clip(click.text),
+          context: clip(click.context)
+        });
+        openNativeDestination(win, nativeLink.dest, { history: true }).catch(logError);
+        return;
+      }
       openNativeDestination(win, nativeLink.dest, { history: true }).catch(logError);
       diagFallbackClick(click, refs, { native: true });
       await resolveFallback(win, frameState, refs, click.clickId, click.beforePage, { nativePending: true });
@@ -1495,7 +1778,9 @@
       }
     }
 
-    schedulePageChangeHighlight(win, frameState, click.clickId, click.beforePage, await passiveClickReferences(win, frameState, click));
+    schedulePageChangeHighlight(win, frameState, click.clickId, click.beforePage, await passiveClickReferences(win, frameState, click), {
+      landingDest: nativeLink?.dest || null
+    });
   }
 
   function removeOverlays(doc) {
@@ -1728,7 +2013,9 @@
               rejected: !!citationHit?.rejected
             });
             passiveClickReferences(win, frameState, click)
-              .then((passiveRefs) => schedulePageChangeHighlight(win, frameState, clickId, beforePage, passiveRefs))
+              .then((passiveRefs) => schedulePageChangeHighlight(win, frameState, clickId, beforePage, passiveRefs, {
+                landingDest: nativeLink.dest
+              }))
               .catch((e) => this.log(e));
             return;
           }
@@ -1744,6 +2031,24 @@
             direct: nativeLink.direct,
             source: "dom"
           });
+          if (nativeDestinationContradictsRefs(nativeLink.dest, refs)) {
+            diag("nativeLink.refMismatch", {
+              page: beforePage,
+              dest: typeof nativeLink.dest === "string" ? nativeLink.dest : !!nativeLink.dest,
+              refs,
+              text: clip(text),
+              context: clip(context)
+            });
+            if (nativeLink.dest) {
+              event.preventDefault();
+              event.stopPropagation();
+              openNativeDestination(win, nativeLink.dest, { history: true }).catch((e) => this.log(e));
+            }
+            else if (!nativeLink.direct) {
+              openNativeDestination(win, nativeLink.dest).catch((e) => this.log(e));
+            }
+            return;
+          }
           if (nativeLink.dest) {
             event.preventDefault();
             event.stopPropagation();
@@ -1835,7 +2140,7 @@
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
       ReferenceGuardHeuristics: Heuristics,
-      ReferenceGuardTestHooks: { clickReferences, findReferenceMatch, isClearlyNonReferenceDestination, itemLines, visibleLinesLookLikeReferences }
+      ReferenceGuardTestHooks: { clickReferences, destinationPoint, findReferenceMatch, isClearlyNonReferenceDestination, isLikelyReferenceDestination, itemLines, nativeDestinationContradictsRef, nativeDestinationContradictsRefs, nearestUnambiguousHit, pageChangeHighlightReferences, passiveCandidateReferences, shouldUseLandingFallback, visibleLinesLookLikeReferences, visibleReferenceEntryGroup, visibleReferenceGroup }
     };
   }
 })();

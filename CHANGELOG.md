@@ -1,5 +1,44 @@
 # Changelog
 
+## 0.2.48
+
+- Remove personal-name attribution from public documentation and package metadata.
+- Keep OpenAI Codex as the sole displayed implementation credit.
+
+## 0.2.47
+
+- Document the plugin architecture, behavior boundaries, verification workflow, and local deployment options.
+- Record that the project was implemented by OpenAI Codex.
+
+## 0.2.46
+
+- Resolve individual numbers inside grouped citations instead of defaulting to the first reference.
+- Anchor numeric and author-year fallback matching to reference-entry starts and reject ambiguous duplicate matches.
+- Stop one-line references before the next entry and keep split PDF numeric labels attached to their text.
+- Use exact PDF destination coordinates for reference-like landing highlights, including same-page destinations.
+- Keep visible author-year highlights through title continuation lines after an early year.
+
+## 0.2.45
+
+- Stop using whole-page passive citation scans for post-native-jump highlighting.
+- Only run passive page-change highlighting when the source click has one unique nearby citation candidate.
+
+## 0.2.44
+
+- Do not let fuzzy citation hits override a native PDF destination that clearly points to a different author-year reference.
+
+## 0.2.43
+
+- Require an explicit reference-like native destination before using landing fallback highlighting.
+- Stop guessing a visible reference entry when Zotero jumps after an unrecognized or destinationless click.
+
+## 0.2.42
+
+- Accept unambiguous near-miss citation clicks when PDF text-layer rectangles are slightly off.
+- Keep all numeric page-level citation hints for Zotero-native jumps instead of only the first one.
+- Highlight the landed reference entry when Zotero jumps to a reference page but source citation hints are unreliable.
+- Add diagnostics for missed post-jump highlighting and rejected clicks without references.
+
 ## 0.2.41
 
 - Skip clearly non-reference PDF destinations such as figures, tables, equations, and sections.
