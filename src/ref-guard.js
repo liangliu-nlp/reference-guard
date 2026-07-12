@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.3.0";
+  const CODE_VERSION = "0.3.1";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const HIGHLIGHT_CLASS = "ref-guard-target-highlight";
@@ -154,6 +154,16 @@
     return dx * dx + dy * dy;
   }
 
+  function destinationTextDistanceSquared(point, rect) {
+    if (point.x == null) {
+      let dy = Math.max(rect.top - point.y, 0, point.y - rect.bottom);
+      return dy * dy;
+    }
+    let dx = rect.left - point.x;
+    let dy = rect.top - point.y;
+    return dx * dx + dy * dy;
+  }
+
   function annotationLinkAtPoint(links, x, y, padding = 1) {
     let hits = (links || []).filter((link) => (
       x >= link.left - padding && x <= link.right + padding
@@ -239,9 +249,10 @@
     if (!isReferenceDestination(dest) && !pageLooksLikeReferences(pageDiv)) return false;
 
     let pageRect = pageDiv.getBoundingClientRect();
-    let anchor = numberArray(viewport.convertToViewportPoint(resolved.point.x || 0, resolved.point.y), 2);
+    let hasX = resolved.point.x != null;
+    let anchor = numberArray(viewport.convertToViewportPoint(hasX ? resolved.point.x : 0, resolved.point.y), 2);
     if (anchor.length < 2) return false;
-    let point = { x: anchor[0], y: anchor[1] };
+    let point = { x: hasX ? anchor[0] : null, y: anchor[1] };
     let items = Array.from(pageDiv.querySelectorAll(".textLayer span")).map((span) => {
       let rect = span.getBoundingClientRect();
       return {
@@ -258,9 +269,9 @@
     if (!items.length) return false;
 
     let target = items.reduce((best, item) => (
-      rectDistanceSquared(point, item.rect) < rectDistanceSquared(point, best.rect) ? item : best
+      destinationTextDistanceSquared(point, item.rect) < destinationTextDistanceSquared(point, best.rect) ? item : best
     ), items[0]);
-    let distance = Math.sqrt(rectDistanceSquared(point, target.rect));
+    let distance = Math.sqrt(destinationTextDistanceSquared(point, target.rect));
     if (distance > 90) return false;
 
     for (let old of state.doc.querySelectorAll(`.${HIGHLIGHT_CLASS}`)) old.remove();
@@ -277,7 +288,7 @@
     highlight.style.borderRadius = "2px";
     highlight.style.boxShadow = "0 0 0 2px rgba(245, 166, 35, 0.95)";
     (state.doc.body || state.doc.documentElement).appendChild(highlight);
-    state.win.setTimeout(() => highlight.remove(), 4500);
+    state.win.setTimeout(() => highlight.remove(), 2000);
     diag("destination.highlight", {
       dest: typeof dest === "string" ? dest : "explicit",
       page: resolved.pageNumber,
@@ -597,7 +608,13 @@
 
   if (typeof module !== "undefined" && module.exports) {
     module.exports = {
-      ReferenceGuardTestHooks: { annotationLinkAtPoint, destinationPoint, isReferenceDestination, rectDistanceSquared }
+      ReferenceGuardTestHooks: {
+        annotationLinkAtPoint,
+        destinationPoint,
+        destinationTextDistanceSquared,
+        isReferenceDestination,
+        rectDistanceSquared
+      }
     };
   }
 })();
