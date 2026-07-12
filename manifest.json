@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "Reference Guard",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Maps native PDF links to exact Zotero Reader destinations and highlights the target.",
   "author": "OpenAI Codex",
   "homepage_url": "https://github.com/liangliu-nlp/reference-guard",

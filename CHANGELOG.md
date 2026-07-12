@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Keep destination highlighting in the PDF column identified by the native `/XYZ` left coordinate.
+- Rank the target text by its start point instead of treating an overlapping line from another column as an exact hit.
+- Preserve vertical-only matching for `FitH` destinations and the existing annotation-to-destination navigation path.
+
 ## 0.3.0
 
 - First usable formal release of Reference Guard.
