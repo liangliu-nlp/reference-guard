@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Let exact internal PDF-annotation navigation override Zotero's competing position overlay for the same pointer gesture, including opaque `PAX@...` destinations.
+- Keep Zotero's native pointer cleanup and all unmatched navigation behavior intact.
+- Remove the redundant manual reader history push so one reference jump creates one back-navigation step.
+
 ## 0.3.1
 
 - Keep destination highlighting in the PDF column identified by the native `/XYZ` left coordinate.

@@ -1,6 +1,6 @@
 {
   "name": "reference-guard",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "description": "A Zotero 9 reader plugin that maps native PDF links to exact destinations and highlights the target.",
   "author": "OpenAI Codex",
