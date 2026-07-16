@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.3.1";
+  const CODE_VERSION = "0.3.2";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const HIGHLIGHT_CLASS = "ref-guard-target-highlight";
@@ -112,6 +112,41 @@
     return null;
   }
 
+  function clearNativePointerDownPosition(view) {
+    if (!view) return false;
+    try {
+      view.pointerDownPosition = null;
+      return true;
+    }
+    catch (_) {
+      return false;
+    }
+  }
+
+  function takeNativePointerUpSuppression(state, event, now = Date.now()) {
+    let suppression = state.nativePointerUpSuppression;
+    if (!suppression) return null;
+    if (now > suppression.expiresAt) {
+      state.nativePointerUpSuppression = null;
+      return null;
+    }
+    if (suppression.pointerId != null && event.pointerId != null && suppression.pointerId !== event.pointerId) {
+      return null;
+    }
+    state.nativePointerUpSuppression = null;
+    return suppression;
+  }
+
+  function captureNativePointerUp(state, event) {
+    let suppression = takeNativePointerUpSuppression(state, event);
+    if (!suppression) return;
+    if (event.type === "pointercancel") return;
+    if (clearNativePointerDownPosition(getZoteroReaderView(state.win))) {
+      diag("native.navigate.suppressed", { dest: suppression.dest });
+    }
+    onAnnotationClick(state, suppression.dest);
+  }
+
   function destinationPoint(destArray) {
     let mode = unwrap(destArray?.[1]);
     mode = typeof mode === "string" ? mode : mode?.name || "";
@@ -206,10 +241,16 @@
   }
 
   async function navigateDestination(state, dest, resolved) {
+    let view = getZoteroReaderView(state.win);
+    let linkService = unwrap(state.app?.pdfLinkService || state.app?.linkService);
     try {
-      let view = getZoteroReaderView(state.win);
+      if (view?._pushHistoryPoint && linkService?.goToDestination) {
+        await view._pushHistoryPoint();
+        await linkService.goToDestination(dest);
+        await view._pushHistoryPoint();
+        return true;
+      }
       if (view?.navigate) {
-        if (view._pushHistoryPoint) await view._pushHistoryPoint();
         await view.navigate({ dest });
         return true;
       }
@@ -218,7 +259,6 @@
       diag("navigate.history.error", { message: String(error) });
     }
 
-    let linkService = unwrap(state.app?.pdfLinkService || state.app?.linkService);
     if (linkService?.goToDestination) {
       await linkService.goToDestination(dest);
       return true;
@@ -308,9 +348,9 @@
   }
 
   async function onAnnotationClick(state, dest, event) {
-    event.preventDefault();
-    event.stopPropagation();
-    event.stopImmediatePropagation?.();
+    event?.preventDefault?.();
+    event?.stopPropagation?.();
+    event?.stopImmediatePropagation?.();
     let clickId = ++state.clickId;
     try {
       let resolved = await resolveDestination(state, dest);
@@ -385,7 +425,18 @@
       event.stopImmediatePropagation?.();
       return;
     }
-    if (event.type === "pointerdown") state.lastPointerHitAt = Date.now();
+    if (event.type === "pointerdown") {
+      state.lastPointerHitAt = Date.now();
+      state.nativePointerUpSuppression = {
+        dest: hit.dest,
+        pointerId: event.pointerId,
+        expiresAt: Date.now() + 1500
+      };
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      return;
+    }
     onAnnotationClick(state, hit.dest, event);
   }
 
@@ -559,24 +610,29 @@
         building: new Set(),
         scanQueued: false,
         lastPointerHitAt: 0,
+        nativePointerUpSuppression: null,
         destroyed: false
       };
       let pageObserver = new win.MutationObserver(() => schedulePageScan(state));
       pageObserver.observe(doc.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class"] });
       let onPageRendered = () => schedulePageScan(state);
       let clickHandler = (event) => captureAnnotationClick(state, event);
+      let pointerUpHandler = (event) => captureNativePointerUp(state, event);
       let eventBus = unwrap(app.eventBus);
       eventBus?.on?.("pagerendered", onPageRendered);
       eventBus?.on?.("scalechanging", onPageRendered);
       eventBus?.on?.("rotationchanging", onPageRendered);
       win.addEventListener("resize", onPageRendered);
       doc.addEventListener("pointerdown", clickHandler, true);
+      doc.addEventListener("pointerup", pointerUpHandler, true);
+      doc.addEventListener("pointercancel", pointerUpHandler, true);
       doc.addEventListener("click", clickHandler, true);
 
       state.pageObserver = pageObserver;
       state.eventBus = eventBus;
       state.onPageRendered = onPageRendered;
       state.clickHandler = clickHandler;
+      state.pointerUpHandler = pointerUpHandler;
       this.frames.set(win, state);
       this.windows.get(parentWin)?.frames.add(win);
       scanPages(state);
@@ -598,6 +654,8 @@
       state.eventBus?.off?.("rotationchanging", state.onPageRendered);
       win.removeEventListener("resize", state.onPageRendered);
       state.doc.removeEventListener("pointerdown", state.clickHandler, true);
+      state.doc.removeEventListener("pointerup", state.pointerUpHandler, true);
+      state.doc.removeEventListener("pointercancel", state.pointerUpHandler, true);
       state.doc.removeEventListener("click", state.clickHandler, true);
       state.doc.getElementById(CSS_ID)?.remove();
       state.doc.documentElement?.removeAttribute(INSTALLED_ATTR);
@@ -610,9 +668,11 @@
     module.exports = {
       ReferenceGuardTestHooks: {
         annotationLinkAtPoint,
+        clearNativePointerDownPosition,
         destinationPoint,
         destinationTextDistanceSquared,
         isReferenceDestination,
+        takeNativePointerUpSuppression,
         rectDistanceSquared
       }
     };

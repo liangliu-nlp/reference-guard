@@ -28,6 +28,12 @@ assert.strictEqual(
 );
 
 assert.strictEqual(
+  hooks.isReferenceDestination("PAX@../../emnlp2025/main/papers/1436.pax@28"),
+  false,
+  "keeps opaque PDF destination names out of semantic reference classification"
+);
+
+assert.strictEqual(
   hooks.rectDistanceSquared(
     { x: 65, y: 436 },
     { left: 60, top: 430, right: 250, bottom: 445 }
@@ -113,6 +119,41 @@ assert.strictEqual(
   ], 400, 372),
   null,
   "does not guess outside a native annotation bound"
+);
+
+const nativeView = { pointerDownPosition: { pageIndex: 2, rects: [[1, 2, 3, 4]] } };
+assert.strictEqual(
+  hooks.clearNativePointerDownPosition(nativeView),
+  true,
+  "allows the native pointerup handler to run without its competing navigation target"
+);
+assert.strictEqual(
+  nativeView.pointerDownPosition,
+  null,
+  "clears only the current native pointer gesture"
+);
+
+const pointerState = {
+  nativePointerUpSuppression: {
+    dest: "PAX@../../emnlp2025/main/papers/1436.pax@28",
+    pointerId: 7,
+    expiresAt: 1000
+  }
+};
+assert.strictEqual(
+  hooks.takeNativePointerUpSuppression(pointerState, { pointerId: 8 }, 500),
+  null,
+  "does not consume another pointer's native navigation"
+);
+assert.deepStrictEqual(
+  hooks.takeNativePointerUpSuppression(pointerState, { pointerId: 7 }, 500),
+  { dest: "PAX@../../emnlp2025/main/papers/1436.pax@28", pointerId: 7, expiresAt: 1000 },
+  "suppresses opaque internal destinations on the matching pointerup once"
+);
+assert.strictEqual(
+  hooks.takeNativePointerUpSuppression(pointerState, { pointerId: 7 }, 500),
+  null,
+  "does not affect later pointer gestures"
 );
 
 console.log("reference-guard annotation overlay ok");
