@@ -121,6 +121,23 @@ assert.strictEqual(
   "does not guess outside a native annotation bound"
 );
 
+const decodedPoint = hooks.pageLocalPoint(
+  { clientX: 520, clientY: 300 },
+  { left: 300, top: 100 }
+);
+assert.deepStrictEqual(
+  decodedPoint,
+  { x: 220, y: 200 },
+  "keeps pointer coordinates local to the PDF iframe page"
+);
+assert.strictEqual(
+  hooks.annotationLinkAtPoint([
+    { dest: "cite.wei2022", left: 15, top: 145, right: 80, bottom: 165 }
+  ], decodedPoint.x, decodedPoint.y),
+  null,
+  "does not subtract an outer iframe offset and turn selected text into a citation hit"
+);
+
 const nativeView = { pointerDownPosition: { pageIndex: 2, rects: [[1, 2, 3, 4]] } };
 assert.strictEqual(
   hooks.clearNativePointerDownPosition(nativeView),

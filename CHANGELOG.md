@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- Keep PDF annotation hit-testing in the PDF iframe's local coordinate space.
+- Prevent shifted outer-frame coordinates from turning ordinary text selection into a reference jump.
+
 ## 0.3.2
 
 - Let exact internal PDF-annotation navigation override Zotero's competing position overlay for the same pointer gesture, including opaque `PAX@...` destinations.

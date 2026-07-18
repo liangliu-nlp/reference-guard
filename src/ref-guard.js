@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.3.2";
+  const CODE_VERSION = "0.3.3";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const HIGHLIGHT_CLASS = "ref-guard-target-highlight";
@@ -378,22 +378,8 @@
     }) || null;
   }
 
-  function frameOffset(win) {
-    let x = 0;
-    let y = 0;
-    let current = win;
-    try {
-      while (current?.parent && current !== current.parent) {
-        let frame = current.frameElement;
-        if (!frame) break;
-        let rect = frame.getBoundingClientRect();
-        x += rect.left;
-        y += rect.top;
-        current = current.parent;
-      }
-    }
-    catch (_) {}
-    return { x, y };
+  function pageLocalPoint(event, pageRect) {
+    return { x: event.clientX - pageRect.left, y: event.clientY - pageRect.top };
   }
 
   function captureAnnotationClick(state, event) {
@@ -405,20 +391,15 @@
     if (!pageEntry || pageEntry.pageDiv !== pageDiv) return;
 
     let pageRect = pageDiv.getBoundingClientRect();
-    let offset = frameOffset(state.win);
-    let points = [
-      { x: event.clientX - pageRect.left, y: event.clientY - pageRect.top, space: "iframe" },
-      { x: event.clientX - offset.x - pageRect.left, y: event.clientY - offset.y - pageRect.top, space: "forwarded" }
-    ];
-    let point = points.find((candidate) => annotationLinkAtPoint(pageEntry.links, candidate.x, candidate.y));
-    let hit = point && annotationLinkAtPoint(pageEntry.links, point.x, point.y);
+    let point = pageLocalPoint(event, pageRect);
+    let hit = annotationLinkAtPoint(pageEntry.links, point.x, point.y);
     if (!hit) {
       if (element.closest?.(".linkAnnotation, .annotationLayer a, .annotationLayer button")) {
-        diag("annotation.boundsMiss", { page: pageNumber, points, offset, links: pageEntry.links.length });
+        diag("annotation.boundsMiss", { page: pageNumber, point, links: pageEntry.links.length });
       }
       return;
     }
-    diag("annotation.boundsHit", { page: pageNumber, dest: typeof hit.dest === "string" ? hit.dest : "explicit", space: point.space });
+    diag("annotation.boundsHit", { page: pageNumber, dest: typeof hit.dest === "string" ? hit.dest : "explicit", space: "iframe" });
     if (event.type === "click" && Date.now() - state.lastPointerHitAt < 1000) {
       event.preventDefault();
       event.stopPropagation();
@@ -672,6 +653,7 @@
         destinationPoint,
         destinationTextDistanceSquared,
         isReferenceDestination,
+        pageLocalPoint,
         takeNativePointerUpSuppression,
         rectDistanceSquared
       }
