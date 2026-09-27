@@ -1,5 +1,5 @@
 (function () {
-  const CODE_VERSION = "0.3.3";
+  const CODE_VERSION = "0.3.4";
   const CSS_ID = "reference-guard-style";
   const INSTALLED_ATTR = "data-reference-guard";
   const HIGHLIGHT_CLASS = "ref-guard-target-highlight";

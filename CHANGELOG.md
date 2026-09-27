@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+
+- Extend install and update compatibility to Zotero 10.0.x while retaining Zotero 9 support.
+- Publish a new installable XPI and update entry for Zotero 10; retain the existing reader behavior.
+- Check both JavaScript entry points during development and CI, and document the standard-PDF-view scope.
+- Verify compatibility against Zotero 10.0.3 reader code; interactive Zotero 10 testing remains pending.
+
 ## 0.3.3
 
 - Keep PDF annotation hit-testing in the PDF iframe's local coordinate space.

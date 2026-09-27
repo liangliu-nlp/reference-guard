@@ -1,6 +1,6 @@
 # Reference Guard
 
-Reference Guard is a Zotero 9 reader plugin for more reliable reference-jump highlighting.
+Reference Guard is a Zotero 9 and 10 reader plugin for more reliable reference-jump highlighting.
 
 The project was implemented by OpenAI Codex.
 
@@ -16,7 +16,7 @@ Version 0.3 uses the same core interaction architecture as Google Scholar PDF Re
 
 Version 0.3.0 is the first usable formal release. It is optimized from real Zotero Reader failures observed in academic PDFs and does not replace Zotero's parser or add OCR.
 
-Tested with Zotero 9.
+Version 0.3.4 supports Zotero 9.0 through 10.0.x. Previously tested with Zotero 9. The Zotero 10 compatibility update was checked against the installed Zotero 10.0.3 reader code and the [official migration guide](https://www.zotero.org/support/dev/zotero_10_for_developers); interactive Zotero 10 testing is still pending.
 
 ## How It Works
 
@@ -30,6 +30,7 @@ This is an independent Zotero implementation informed by Google Scholar PDF Read
 ## Scope and Limitations
 
 - Highlights are temporary visual overlays, not Zotero annotations.
+- Highlighting applies to the standard PDF view. Zotero 10's reflowed Reading Mode keeps Zotero's native behavior.
 - Exact jumping requires a native internal PDF link annotation.
 - Visible highlighting additionally requires a usable target text layer and a destination with a vertical coordinate.
 - Scanned, flattened, or malformed PDFs without internal links keep Zotero's native behavior; Reference Guard does not infer a destination from citation text.
@@ -66,9 +67,10 @@ Run the annotation-mapping tests:
 node .\tests\ref-guard-heuristics.test.js
 ```
 
-Run a syntax check:
+Check both the bootstrap and reader scripts for syntax errors:
 
 ```powershell
+node --check .\bootstrap.js
 node --check .\src\ref-guard.js
 ```
 
@@ -108,7 +110,9 @@ For direct local deployment, copy the packaged XPI into the active Zotero profil
 
 `manifest.json` points `applications.zotero.update_url` to `updates.json` on the `main` branch. Before publishing a release, make sure `updates.json` points to the matching GitHub release asset.
 
-Zotero 9 requires `applications.zotero` in `manifest.json`. Zotero update manifests use Mozilla-style JSON update manifests.
+Zotero 9 and 10 require `applications.zotero` in `manifest.json`. Zotero update manifests use Mozilla-style JSON update manifests.
+
+Version 0.3.4 provides a new XPI with Zotero 9 and 10 compatibility and retains the existing reader behavior. Its entry in `updates.json` points to the matching release asset and SHA-256 hash. The previous 0.3.3 entry retains its original download URL, hash, and Zotero 9 compatibility range.
 
 ## License
 
