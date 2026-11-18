@@ -1,5 +1,7 @@
 # Reference Guard
 
+[![Zotero 中文社区 · 已收录](https://zotero-chinese.com/badges/listed.svg)](https://zotero-chinese.com/plugins/)
+
 Reference Guard is a Zotero 9 and 10 reader plugin for more reliable reference-jump highlighting.
 
 The project was implemented by OpenAI Codex.
